@@ -23,6 +23,10 @@ await build({
   configFile: false,
   root: workspaceRoot,
   logLevel: 'info',
+  define: {
+    'process.env.NODE_ENV': '"production"',
+    'process.env': '{}',
+  },
   build: {
     lib: {
       entry,
