@@ -35,6 +35,9 @@
 - 前端开发服务：Vite 固定端口 `51720`
 - 后端：独立 Node 服务，端口 `32123`
 - 健康检查：`GET http://localhost:32123/health`
+- 联调方式：
+  - 本地开发默认直连后端：`http://localhost:32123`
+  - 部署到服务器时建议前后端同域，通过 Nginx 反代访问 `/api/*`
 - 启动命令：
   - 前端：`npm run dev`
   - 后端：`npm run dev:api`

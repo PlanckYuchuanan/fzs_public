@@ -30,10 +30,19 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
   const [authBusy, setAuthBusy] = useState<boolean>(false);
 
   const apiBaseUrl = useMemo(function () {
-    const raw = (innerProps?.config && typeof (innerProps.config as any).apiBaseUrl === 'string')
+    const configured = (innerProps?.config && typeof (innerProps.config as any).apiBaseUrl === 'string')
       ? (innerProps.config as any).apiBaseUrl
-      : 'http://localhost:32123';
-    return raw.replace(/\/$/, '');
+      : '';
+
+    if (configured) return configured.replace(/\/$/, '');
+
+    if (typeof window !== 'undefined') {
+      const host = window.location.hostname;
+      const isLocal = host === 'localhost' || host === '127.0.0.1';
+      return isLocal ? 'http://localhost:32123' : '';
+    }
+
+    return '';
   }, [innerProps?.config]);
 
   const fetchJson = useCallback(async function (path: string, options?: RequestInit) {
