@@ -73,52 +73,49 @@
   <div id="root"></div>
 
   <!-- 加载 bootstrap JS（会自动挂载到 window.HtmlTemplateBootstrap） -->
-  <script type="module" src="{{BOOTSTRAP_PATH}}"></script>
+  <script src="{{BOOTSTRAP_PATH}}"></script>
 
-  <script type="module">
-    // 等待 bootstrap 和组件加载完成
-    function waitForReady() {
-      if (window.HtmlTemplateBootstrap) {
-        const { renderComponent, React, ReactDOM } = window.HtmlTemplateBootstrap;
+  <script>
+    (function () {
+      function init() {
+        var bootstrap = window.HtmlTemplateBootstrap;
+        if (!bootstrap) {
+          setTimeout(init, 10);
+          return;
+        }
 
-        // 将 React 和 ReactDOM 挂载到全局
-        window.React = React;
-        window.ReactDOM = ReactDOM;
+        window.React = bootstrap.React;
+        window.ReactDOM = bootstrap.ReactDOM;
 
-        const entrySrc = "{{ENTRY}}";
-        let resolvedComponent = null;
+        var resolvedComponent = null;
         window.__AXHUB_DEFINE_COMPONENT__ = function (Component) {
           resolvedComponent = Component;
         };
 
-        const loadEntry = () =>
-          new Promise((resolve, reject) => {
-            const s = document.createElement('script');
-            s.src = entrySrc;
-            s.onload = resolve;
-            s.onerror = reject;
-            document.head.appendChild(s);
-          });
-
-        loadEntry().then(function () {
-          function waitUserComponent() {
-            if (resolvedComponent) {
-              try {
-                delete window.__AXHUB_DEFINE_COMPONENT__;
-              } catch {}
-              renderComponent(resolvedComponent);
-            } else {
-              setTimeout(waitUserComponent, 10);
-            }
-          }
-          waitUserComponent();
-        });
-      } else {
-        setTimeout(waitForReady, 10);
+        window.__AXHUB_RENDER_COMPONENT__ = function () {
+          if (!resolvedComponent) return false;
+          try {
+            delete window.__AXHUB_DEFINE_COMPONENT__;
+          } catch {}
+          bootstrap.renderComponent(resolvedComponent);
+          return true;
+        };
       }
-    }
 
-    waitForReady();
+      init();
+    })();
+  </script>
+
+  <script src="{{ENTRY}}"></script>
+
+  <script>
+    (function () {
+      function render() {
+        if (window.__AXHUB_RENDER_COMPONENT__ && window.__AXHUB_RENDER_COMPONENT__()) return;
+        setTimeout(render, 10);
+      }
+      render();
+    })();
   </script>
 
 </body>

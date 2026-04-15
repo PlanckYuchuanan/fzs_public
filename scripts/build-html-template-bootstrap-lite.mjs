@@ -26,7 +26,8 @@ await build({
   build: {
     lib: {
       entry,
-      formats: ['es'],
+      name: 'HtmlTemplateBootstrapLite',
+      formats: ['iife'],
       fileName: () => 'html-template-bootstrap-lite.js',
     },
     outDir,
