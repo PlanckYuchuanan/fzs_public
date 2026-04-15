@@ -86,6 +86,11 @@
         window.ReactDOM = ReactDOM;
 
         const entrySrc = "{{ENTRY}}";
+        let resolvedComponent = null;
+        window.__AXHUB_DEFINE_COMPONENT__ = function (Component) {
+          resolvedComponent = Component;
+        };
+
         const loadEntry = () =>
           new Promise((resolve, reject) => {
             const s = document.createElement('script');
@@ -97,9 +102,11 @@
 
         loadEntry().then(function () {
           function waitUserComponent() {
-            if (window.UserComponent) {
-              const Component = window.UserComponent.Component || window.UserComponent.default || window.UserComponent;
-              renderComponent(Component);
+            if (resolvedComponent) {
+              try {
+                delete window.__AXHUB_DEFINE_COMPONENT__;
+              } catch {}
+              renderComponent(resolvedComponent);
             } else {
               setTimeout(waitUserComponent, 10);
             }
