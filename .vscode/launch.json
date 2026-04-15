@@ -1,0 +1,21 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Axhub Make (Vite)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run dev",
+      "cwd": "${workspaceFolder}"
+    },
+  ],
+  "compounds": [
+    {
+      "name": "Dev + Ref Center",
+      "configurations": [
+        "Axhub Make (Vite)",
+        "Chrome: Ref Center"
+      ]
+    }
+  ]
+}
