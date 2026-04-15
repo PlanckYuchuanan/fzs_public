@@ -49,7 +49,9 @@ function generateHtmlForDirectory(dir, baseDir = distDir) {
     } else if (item.name.endsWith('.js') && !item.name.includes('.worker')) {
       // 为 JS 文件生成 HTML
       const relativePath = path.relative(baseDir, itemPath);
-      const jsName = relativePath.replace('.js', '');
+      const normalizedRelativePath = relativePath.split(path.sep).join('/');
+      const jsName = normalizedRelativePath.replace('.js', '');
+      if (jsName.startsWith('assets/')) continue;
       const htmlPath = path.join(dir, item.name.replace('.js', '.html'));
 
       // 根据路径生成标题
@@ -69,8 +71,8 @@ function generateHtmlForDirectory(dir, baseDir = distDir) {
       const relativeDir = path.relative(baseDir, dir);
       const depth = relativeDir ? relativeDir.split(path.sep).length : 0;
       const bootstrapPath = depth > 0 
-        ? '../'.repeat(depth) + 'assets/html-template-bootstrap.js'
-        : './assets/html-template-bootstrap.js';
+        ? '../'.repeat(depth) + 'assets/html-template-bootstrap-lite.js'
+        : './assets/html-template-bootstrap-lite.js';
 
       // 替换模板变量
       let html = template.replace('{{TITLE}}', title);
@@ -91,55 +93,10 @@ generateHtmlForDirectory(distDir);
 
 console.log(`\n完成！共生成 ${generatedCount} 个 HTML 文件。`);
 console.log('模板文件: admin/html-template.html\n');
-
-// 复制 bootstrap JS 到 dist/assets
-const srcBootstrap = path.join(adminDir, 'assets/html-template-bootstrap.js');
-const destAssetsDir = path.join(distDir, 'assets');
-const destBootstrap = path.join(destAssetsDir, 'html-template-bootstrap.js');
-
-if (fs.existsSync(srcBootstrap)) {
-  if (!fs.existsSync(destAssetsDir)) {
-    fs.mkdirSync(destAssetsDir, { recursive: true });
-  }
-  fs.copyFileSync(srcBootstrap, destBootstrap);
-  console.log('✓ html-template-bootstrap.js 已复制到 dist/assets');
-  
-  // 同时复制其他必要的依赖（如果有的话）
-  const assetsFiles = fs.readdirSync(path.join(adminDir, 'assets'));
-  for (const file of assetsFiles) {
-    // 复制 bootstrap 依赖的 chunk 文件
-    if (file.startsWith('index-') && file.endsWith('.js')) {
-      const src = path.join(adminDir, 'assets', file);
-      const dest = path.join(destAssetsDir, file);
-      fs.copyFileSync(src, dest);
-      console.log(`✓ ${file} 已复制到 dist/assets`);
-    }
-  }
-
-  const srcChunksDir = path.join(adminDir, 'assets', 'chunks');
-  const destChunksDir = path.join(destAssetsDir, 'chunks');
-  if (fs.existsSync(srcChunksDir)) {
-    fs.mkdirSync(destChunksDir, { recursive: true });
-    const stack = [{ from: srcChunksDir, to: destChunksDir }];
-    while (stack.length) {
-      const { from, to } = stack.pop();
-      const entries = fs.readdirSync(from, { withFileTypes: true });
-      for (const ent of entries) {
-        const srcPath = path.join(from, ent.name);
-        const dstPath = path.join(to, ent.name);
-        if (ent.isDirectory()) {
-          fs.mkdirSync(dstPath, { recursive: true });
-          stack.push({ from: srcPath, to: dstPath });
-        } else {
-          fs.copyFileSync(srcPath, dstPath);
-        }
-      }
-    }
-    console.log('✓ admin/assets/chunks 已复制到 dist/assets/chunks');
-  } else {
-    console.warn('⚠ admin/assets/chunks 不存在，请先构建 prototype-admin');
-  }
+const liteBootstrap = path.join(distDir, 'assets', 'html-template-bootstrap-lite.js');
+if (fs.existsSync(liteBootstrap)) {
+  console.log('✓ html-template-bootstrap-lite.js 已存在于 dist/assets');
 } else {
-  console.warn('⚠ html-template-bootstrap.js 不存在，请先构建 prototype-admin');
+  console.warn('⚠ html-template-bootstrap-lite.js 不存在，请先运行 node scripts/build-html-template-bootstrap-lite.mjs');
 }
 

@@ -9,7 +9,7 @@
     "start": "vite",
     "dev:api": "node server/index.mjs",
     "dev:all": "node scripts/dev-all.mjs",
-    "build": "node scripts/scan-entries.js && node scripts/build-all.js && node scripts/generate-dist-html.js",
+    "build": "node scripts/scan-entries.js && node scripts/build-all.js && node scripts/build-html-template-bootstrap-lite.mjs && node scripts/generate-dist-html.js",
     "preview": "vite preview",
     "test": "vitest --run",
     "test:watch": "vitest",
