@@ -33,15 +33,29 @@ if (fs.existsSync(distDir)) {
 
 for (const key of entryKeys) {
   console.log(`\n==== 构建入口: ${key} ====\n`);
-  const result = spawnSync('npx', ['vite', 'build'], {
+  const isWin = process.platform === 'win32';
+  const result = isWin
+    ? spawnSync('cmd.exe', ['/d', '/s', '/c', 'npx vite build'], {
+      cwd: workspaceRoot,
+      env: { ...process.env, ENTRY_KEY: key },
+      stdio: 'inherit'
+    })
+    : spawnSync('npx', ['vite', 'build'], {
     cwd: workspaceRoot,
     env: { ...process.env, ENTRY_KEY: key },
     stdio: 'inherit'
-  });
+    });
+
+  if (result.error) {
+    console.error(`构建 ${key} 失败：无法执行 npx`);
+    console.error(result.error);
+    process.exit(1);
+  }
 
   if (result.status !== 0) {
-    console.error(`构建 ${key} 失败，退出码 ${result.status}`);
-    process.exit(result.status ?? 1);
+    const extra = result.signal ? `，signal=${result.signal}` : '';
+    console.error(`构建 ${key} 失败，退出码 ${result.status}${extra}`);
+    process.exit(typeof result.status === 'number' ? result.status : 1);
   }
 }
 

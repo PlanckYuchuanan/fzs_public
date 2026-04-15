@@ -115,6 +115,30 @@ if (fs.existsSync(srcBootstrap)) {
       console.log(`✓ ${file} 已复制到 dist/assets`);
     }
   }
+
+  const srcChunksDir = path.join(adminDir, 'assets', 'chunks');
+  const destChunksDir = path.join(destAssetsDir, 'chunks');
+  if (fs.existsSync(srcChunksDir)) {
+    fs.mkdirSync(destChunksDir, { recursive: true });
+    const stack = [{ from: srcChunksDir, to: destChunksDir }];
+    while (stack.length) {
+      const { from, to } = stack.pop();
+      const entries = fs.readdirSync(from, { withFileTypes: true });
+      for (const ent of entries) {
+        const srcPath = path.join(from, ent.name);
+        const dstPath = path.join(to, ent.name);
+        if (ent.isDirectory()) {
+          fs.mkdirSync(dstPath, { recursive: true });
+          stack.push({ from: srcPath, to: dstPath });
+        } else {
+          fs.copyFileSync(srcPath, dstPath);
+        }
+      }
+    }
+    console.log('✓ admin/assets/chunks 已复制到 dist/assets/chunks');
+  } else {
+    console.warn('⚠ admin/assets/chunks 不存在，请先构建 prototype-admin');
+  }
 } else {
   console.warn('⚠ html-template-bootstrap.js 不存在，请先构建 prototype-admin');
 }

@@ -75,24 +75,37 @@
   <!-- 加载 bootstrap JS（会自动挂载到 window.HtmlTemplateBootstrap） -->
   <script type="module" src="{{BOOTSTRAP_PATH}}"></script>
 
-  <!-- 加载组件 JS（IIFE 格式，会挂载 UserComponent 到 window） -->
-  <script src="{{ENTRY}}"></script>
-
   <script type="module">
     // 等待 bootstrap 和组件加载完成
     function waitForReady() {
-      if (window.HtmlTemplateBootstrap && window.UserComponent) {
+      if (window.HtmlTemplateBootstrap) {
         const { renderComponent, React, ReactDOM } = window.HtmlTemplateBootstrap;
 
         // 将 React 和 ReactDOM 挂载到全局
         window.React = React;
         window.ReactDOM = ReactDOM;
 
-        // 获取组件
-        const Component = window.UserComponent.Component || window.UserComponent.default || window.UserComponent;
+        const entrySrc = "{{ENTRY}}";
+        const loadEntry = () =>
+          new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = entrySrc;
+            s.onload = resolve;
+            s.onerror = reject;
+            document.head.appendChild(s);
+          });
 
-        // 渲染组件
-        renderComponent(Component);
+        loadEntry().then(function () {
+          function waitUserComponent() {
+            if (window.UserComponent) {
+              const Component = window.UserComponent.Component || window.UserComponent.default || window.UserComponent;
+              renderComponent(Component);
+            } else {
+              setTimeout(waitUserComponent, 10);
+            }
+          }
+          waitUserComponent();
+        });
       } else {
         setTimeout(waitForReady, 10);
       }
