@@ -19,6 +19,14 @@ const CONFIG_LIST: ConfigItem[] = [];
 
 const DATA_LIST: DataDesc[] = [];
 
+const NAV_ITEMS: Array<{ id: string; label: string; desc: string }> = [
+  { id: 'dashboard', label: '仪表盘', desc: '概览与关键指标（占位）' },
+  { id: 'tasks', label: '任务中心', desc: '任务与流程（占位）' },
+  { id: 'projects', label: '项目管理', desc: '项目与资源（占位）' },
+  { id: 'analytics', label: '数据分析', desc: '报表与分析（占位）' },
+  { id: 'settings', label: '系统设置', desc: '权限与配置（占位）' },
+];
+
 const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroStart(innerProps, ref) {
   const onEvent = typeof innerProps?.onEvent === 'function' ? innerProps.onEvent : function () {};
 
@@ -28,6 +36,7 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
   const [authError, setAuthError] = useState<string>('');
   const [user, setUser] = useState<{ userId: string; phone: string; registeredAt: string } | null>(null);
   const [authBusy, setAuthBusy] = useState<boolean>(false);
+  const [navId, setNavId] = useState<string>('dashboard');
 
   const apiBaseUrl = useMemo(function () {
     const configured = (innerProps?.config && typeof (innerProps.config as any).apiBaseUrl === 'string')
@@ -35,6 +44,11 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
       : '';
 
     if (configured) return configured.replace(/\/$/, '');
+
+    const envApiBase = typeof import.meta !== 'undefined' && (import.meta as any).env
+      ? ((import.meta as any).env.VITE_API_BASE_URL as string | undefined)
+      : undefined;
+    if (typeof envApiBase === 'string' && envApiBase.trim()) return envApiBase.trim().replace(/\/$/, '');
 
     if (typeof window !== 'undefined') {
       const host = window.location.hostname;
@@ -217,23 +231,105 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
     );
   }
 
+  const activeNav = NAV_ITEMS.find((x) => x.id === navId) ?? NAV_ITEMS[0];
+
   return (
-    <div className="fzs-root">
-      <div className="fzs-topbar">
-        <div className="fzs-topbar-left">从零开始</div>
-        <div className="fzs-topbar-right">
-          <div className="fzs-user-area">
-            <div className="fzs-user-chip">
-              <span className="fzs-user-phone">{user.phone}</span>
-            </div>
-            <button className="fzs-link" type="button" onClick={logout}>退出</button>
-          </div>
-        </div>
+    <div className="fzs-app-root">
+      <div className="fzs-auth-bg">
+        <div className="fzs-auth-orb a" />
+        <div className="fzs-auth-orb b" />
+        <div className="fzs-auth-grid" />
       </div>
 
-      <button className="fzs-primary-button" type="button" onClick={handleCreateTask}>
-        创建任务
-      </button>
+      <aside className="fzs-side">
+        <div className="fzs-side-top">
+          <div className="fzs-side-brand">
+            <div className="fzs-auth-logo">FZS</div>
+            <div className="fzs-side-brand-text">
+              <div className="fzs-side-title">从零开始</div>
+              <div className="fzs-side-subtitle">Workspace</div>
+            </div>
+          </div>
+        </div>
+
+        <nav className="fzs-side-nav" aria-label="主导航">
+          {NAV_ITEMS.map((item) => (
+            <button
+              key={item.id}
+              className={item.id === activeNav.id ? 'fzs-nav-item active' : 'fzs-nav-item'}
+              type="button"
+              onClick={() => setNavId(item.id)}
+            >
+              <div className="fzs-nav-label">{item.label}</div>
+              <div className="fzs-nav-desc">{item.desc}</div>
+            </button>
+          ))}
+        </nav>
+      </aside>
+
+      <div className="fzs-main">
+        <header className="fzs-main-topbar">
+          <div className="fzs-main-title">
+            <div className="fzs-main-title-text">{activeNav.label}</div>
+            <div className="fzs-main-title-sub">{activeNav.desc}</div>
+          </div>
+          <div className="fzs-user-area">
+            <div className="fzs-user-chip dark">
+              <span className="fzs-user-phone">{user.phone}</span>
+            </div>
+            <button className="fzs-link dark" type="button" onClick={logout}>退出</button>
+          </div>
+        </header>
+
+        <main className="fzs-main-content">
+          <div className="fzs-panel">
+            <div className="fzs-panel-head">
+              <div className="fzs-panel-head-left">
+                <div className="fzs-panel-title">{activeNav.label}</div>
+                <div className="fzs-panel-desc">{activeNav.desc}</div>
+              </div>
+              {activeNav.id === 'tasks' && (
+                <button className="fzs-primary-button dark" type="button" onClick={handleCreateTask}>
+                  创建任务
+                </button>
+              )}
+            </div>
+
+            <div className="fzs-panel-body">
+              {activeNav.id === 'dashboard' && (
+                <div className="fzs-empty-block">
+                  <div className="fzs-empty-title">欢迎回来</div>
+                  <div className="fzs-empty-desc">这里将展示你的核心数据与快捷入口。</div>
+                </div>
+              )}
+              {activeNav.id === 'tasks' && (
+                <div className="fzs-empty-block">
+                  <div className="fzs-empty-title">任务中心</div>
+                  <div className="fzs-empty-desc">后续会在这里扩展任务列表、详情与状态流转。</div>
+                </div>
+              )}
+              {activeNav.id === 'projects' && (
+                <div className="fzs-empty-block">
+                  <div className="fzs-empty-title">项目管理</div>
+                  <div className="fzs-empty-desc">后续会在这里扩展项目、成员、资源与里程碑。</div>
+                </div>
+              )}
+              {activeNav.id === 'analytics' && (
+                <div className="fzs-empty-block">
+                  <div className="fzs-empty-title">数据分析</div>
+                  <div className="fzs-empty-desc">后续会在这里扩展报表、趋势与洞察。</div>
+                </div>
+              )}
+              {activeNav.id === 'settings' && (
+                <div className="fzs-empty-block">
+                  <div className="fzs-empty-title">系统设置</div>
+                  <div className="fzs-empty-desc">后续会在这里扩展权限、配置与安全策略。</div>
+                </div>
+              )}
+            </div>
+          </div>
+        </main>
+      </div>
     </div>
   );
 });
