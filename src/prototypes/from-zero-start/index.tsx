@@ -35,6 +35,13 @@ type ProductServicePublicRow = {
   description: string;
   referenceWeeks: number;
   ownerText: string;
+  typeId: string;
+  typeName: string;
+};
+
+type ProductServiceTypePublicRow = {
+  typeId: string;
+  name: string;
 };
 
 const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroStart(innerProps, ref) {
@@ -48,6 +55,8 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
   const [authBusy, setAuthBusy] = useState<boolean>(false);
   const [navId, setNavId] = useState<string>('dashboard');
   const [productServices, setProductServices] = useState<ProductServicePublicRow[]>([]);
+  const [productServiceTypes, setProductServiceTypes] = useState<ProductServiceTypePublicRow[]>([]);
+  const [productServiceTypeSelected, setProductServiceTypeSelected] = useState<string>('all');
   const [productServicesBusy, setProductServicesBusy] = useState<boolean>(false);
   const [productServicesError, setProductServicesError] = useState<string>('');
 
@@ -179,6 +188,7 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
       const { res, json } = await fetchJson('/api/product-services', { method: 'GET' });
       if (res.ok && json?.success && Array.isArray(json.services)) {
         setProductServices(json.services);
+        if (Array.isArray(json.types)) setProductServiceTypes(json.types);
         return;
       }
       if (res.status === 401) {
@@ -200,6 +210,17 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
       setProductServicesBusy(false);
     }
   }, [fetchJson]);
+
+  const filteredProductServices = useMemo(function () {
+    if (productServiceTypeSelected === 'all') return productServices;
+    return productServices.filter((s) => s.typeId === productServiceTypeSelected);
+  }, [productServices, productServiceTypeSelected]);
+
+  useEffect(() => {
+    if (productServiceTypeSelected === 'all') return;
+    const exists = productServiceTypes.some((t) => t.typeId === productServiceTypeSelected);
+    if (!exists) setProductServiceTypeSelected('all');
+  }, [productServiceTypeSelected, productServiceTypes]);
 
   useEffect(() => {
     void loadMe();
@@ -382,6 +403,28 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
               {activeNav.id === 'products' && (
                 <div className="fzs-ps-root">
                   {productServicesError && <div className="fzs-error">{productServicesError}</div>}
+                  <div className="fzs-ps-filter">
+                    <div className="fzs-ps-filter-label">产品服务类型</div>
+                    <div className="fzs-ps-filter-list">
+                      <button
+                        className={productServiceTypeSelected === 'all' ? 'fzs-ps-chip active' : 'fzs-ps-chip'}
+                        type="button"
+                        onClick={() => setProductServiceTypeSelected('all')}
+                      >
+                        全部
+                      </button>
+                      {productServiceTypes.map((t) => (
+                        <button
+                          key={t.typeId}
+                          className={productServiceTypeSelected === t.typeId ? 'fzs-ps-chip active' : 'fzs-ps-chip'}
+                          type="button"
+                          onClick={() => setProductServiceTypeSelected(t.typeId)}
+                        >
+                          {t.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <div className="fzs-ps-table">
                     <div className="fzs-ps-row header">
                       <div>产品服务名称</div><div>WBS编码</div><div>描述</div><div>参考时间</div><div>责任方</div>
@@ -391,13 +434,13 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
                         <div className="fzs-empty-title">加载中...</div>
                         <div className="fzs-empty-desc">正在获取已启用的产品服务。</div>
                       </div>
-                    ) : productServices.length === 0 ? (
+                    ) : filteredProductServices.length === 0 ? (
                       <div className="fzs-empty-block">
                         <div className="fzs-empty-title">暂无数据</div>
                         <div className="fzs-empty-desc">当前没有启用状态的产品服务。</div>
                       </div>
                     ) : (
-                      productServices.map((s, idx) => (
+                      filteredProductServices.map((s, idx) => (
                         <div key={`${s.wbsCode}-${idx}`} className="fzs-ps-row">
                           <div className="fzs-ps-name">{s.name}</div>
                           <div>{s.wbsCode}</div>

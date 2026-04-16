@@ -989,9 +989,13 @@ async function main() {
         const ok = await ensureDbReady();
         if (!ok) return writeJson(req, res, 503, { success: false, code: 'DB_UNAVAILABLE', message: '数据库不可用' });
 
-        const [rows] = await state.pool.query(
-          'SELECT name, wbs_code, description, reference_weeks, owner_text FROM product_services WHERE is_enabled = 1 ORDER BY created_at DESC',
-        );
+        const [rows] = await state.pool.query(`
+          SELECT ps.name, ps.wbs_code, ps.description, ps.reference_weeks, ps.owner_text, ps.type_id, pst.name AS type_name
+          FROM product_services ps
+          LEFT JOIN product_service_types pst ON pst.id = ps.type_id
+          WHERE ps.is_enabled = 1
+          ORDER BY ps.created_at DESC
+        `);
         const services = Array.isArray(rows)
           ? rows.map((r) => ({
             name: r.name,
@@ -999,9 +1003,23 @@ async function main() {
             description: r.description || '',
             referenceWeeks: typeof r.reference_weeks === 'number' ? r.reference_weeks : Number(r.reference_weeks || 0),
             ownerText: r.owner_text || '',
+            typeId: r.type_id || '',
+            typeName: r.type_name || '',
           }))
           : [];
-        return writeJson(req, res, 200, { success: true, services });
+
+        const [typeRows] = await state.pool.query(`
+          SELECT DISTINCT ps.type_id, pst.name AS name
+          FROM product_services ps
+          INNER JOIN product_service_types pst ON pst.id = ps.type_id
+          WHERE ps.is_enabled = 1 AND ps.type_id IS NOT NULL
+          ORDER BY pst.name ASC
+        `);
+        const types = Array.isArray(typeRows)
+          ? typeRows.map((r) => ({ typeId: r.type_id, name: r.name }))
+          : [];
+
+        return writeJson(req, res, 200, { success: true, services, types });
       }
 
       if (req.method === 'GET' && pathname === '/api/admin/admin-users') {

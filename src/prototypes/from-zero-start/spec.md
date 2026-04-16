@@ -115,5 +115,5 @@
 
 - `GET /api/product-services`
   - 说明：仅返回启用状态（is_enabled=1）的产品服务列表（产品端只读展示）
-  - 成功：`{ success: true, services: Array<{ name, wbsCode, description, referenceWeeks, ownerText }> }`
+  - 成功：`{ success: true, services: Array<{ name, wbsCode, description, referenceWeeks, ownerText, typeId, typeName }>, types: Array<{ typeId, name }> }`
   - 失败：`401`，message 为“未登录”
