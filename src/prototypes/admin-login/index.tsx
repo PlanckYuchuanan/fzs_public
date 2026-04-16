@@ -61,6 +61,10 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function AdminLogin(
   const [usersTotal, setUsersTotal] = useState<number>(0);
   const [admins, setAdmins] = useState<AdminProfile[]>([]);
   const [panelBusy, setPanelBusy] = useState<boolean>(false);
+  const [createAdminOpen, setCreateAdminOpen] = useState<boolean>(false);
+  const [createAdminPhone, setCreateAdminPhone] = useState<string>('');
+  const [createAdminPassword, setCreateAdminPassword] = useState<string>('');
+  const [createAdminBusy, setCreateAdminBusy] = useState<boolean>(false);
 
   const apiBaseUrl = useMemo(function () {
     const configured = (innerProps?.config && typeof (innerProps.config as any).apiBaseUrl === 'string')
@@ -300,6 +304,41 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function AdminLogin(
     }
   }, [fetchJson, loadAdmins, loadMe]);
 
+  const submitCreateAdmin = useCallback(async function () {
+    const trimmedPhone = createAdminPhone.trim().replace(/[\s-]/g, '').replace(/^\+?86/, '');
+    const pwd = createAdminPassword;
+    if (!trimmedPhone) {
+      setError('请输入管理员手机号');
+      return;
+    }
+    if (!/^1[3-9]\d{9}$/.test(trimmedPhone)) {
+      setError('手机号格式不正确（中国大陆 11 位）');
+      return;
+    }
+    if (!pwd || pwd.length < 6) {
+      setError('密码至少 6 位');
+      return;
+    }
+
+    setCreateAdminBusy(true);
+    setError('');
+    try {
+      const { res, json } = await fetchJson('/api/admin/admin-users/create', {
+        method: 'POST',
+        body: JSON.stringify({ phone: trimmedPhone, password: pwd }),
+      });
+      if (!res.ok || !json?.success) throw new Error(mapAdminApiError(res, json, '添加管理员失败'));
+      setCreateAdminOpen(false);
+      setCreateAdminPhone('');
+      setCreateAdminPassword('');
+      await loadAdmins();
+    } catch (e: any) {
+      setError(e?.message || '添加管理员失败');
+    } finally {
+      setCreateAdminBusy(false);
+    }
+  }, [createAdminPassword, createAdminPhone, fetchJson, loadAdmins]);
+
   const backToUser = useCallback(function () {
     const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
     window.location.href = isLocal ? '/prototypes/from-zero-start' : '/prototypes/from-zero-start.html';
@@ -378,9 +417,16 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function AdminLogin(
                   <div className="fzs-panel-title">{navId === 'users' ? '用户管理' : '管理员管理'}</div>
                   <div className="fzs-panel-desc">{navId === 'users' ? '可启用/停用普通用户，停用后不可登录' : '可启用/停用管理员，并设置权限范围'}</div>
                 </div>
-                <button className="fzs-primary-button dark" type="button" onClick={() => void refreshPanel(navId)} disabled={panelBusy}>
-                  {panelBusy ? '刷新中...' : '刷新'}
-                </button>
+                <div className="fzs-admin-actions">
+                  {navId === 'admins' && admin.isSuperadmin && (
+                    <button className="fzs-primary-button dark" type="button" onClick={() => setCreateAdminOpen(true)} disabled={panelBusy}>
+                      添加管理员
+                    </button>
+                  )}
+                  <button className="fzs-primary-button dark" type="button" onClick={() => void refreshPanel(navId)} disabled={panelBusy}>
+                    {panelBusy ? '刷新中...' : '刷新'}
+                  </button>
+                </div>
               </div>
 
               <div className="fzs-panel-body">
@@ -455,6 +501,32 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function AdminLogin(
             </div>
           </main>
         </div>
+        {createAdminOpen && (
+          <div className="fzs-modal-backdrop" role="dialog" aria-modal="true">
+            <div className="fzs-modal">
+              <div className="fzs-modal-header">
+                <div className="fzs-modal-title">添加管理员</div>
+                <button className="fzs-modal-close" type="button" onClick={() => setCreateAdminOpen(false)} disabled={createAdminBusy}>×</button>
+              </div>
+              <div className="fzs-modal-body">
+                <div className="fzs-field">
+                  <div className="fzs-label">管理员手机号</div>
+                  <input className="fzs-input" value={createAdminPhone} onChange={(e) => setCreateAdminPhone(e.target.value)} placeholder="请输入手机号" />
+                </div>
+                <div className="fzs-field">
+                  <div className="fzs-label">密码</div>
+                  <input className="fzs-input" value={createAdminPassword} onChange={(e) => setCreateAdminPassword(e.target.value)} placeholder="请输入密码（至少 6 位）" type="password" />
+                </div>
+              </div>
+              <div className="fzs-modal-footer">
+                <button className="fzs-btn-secondary" type="button" onClick={() => setCreateAdminOpen(false)} disabled={createAdminBusy}>取消</button>
+                <button className="fzs-btn-primary" type="button" onClick={() => void submitCreateAdmin()} disabled={createAdminBusy}>
+                  {createAdminBusy ? '添加中...' : '确认添加'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }

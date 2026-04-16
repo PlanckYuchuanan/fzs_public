@@ -753,6 +753,45 @@ async function main() {
         return writeJson(req, res, 200, { success: true, admins });
       }
 
+      if (req.method === 'POST' && pathname === '/api/admin/admin-users/create') {
+        const auth = await resolveAdminFromRequest(req);
+        if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });
+        if (!auth.admin?.is_superadmin) return writeJson(req, res, 403, { success: false, code: 'FORBIDDEN', message: '仅超管可添加管理员' });
+
+        const body = await readJson(req);
+        const phone = normalizePhone(body.phone);
+        const password = body.password;
+
+        if (!phone) return writeJson(req, res, 400, { success: false, code: 'PHONE_REQUIRED', message: '手机号不能为空' });
+        if (!validateChinaMainlandMobile(phone)) {
+          return writeJson(req, res, 400, { success: false, code: 'PHONE_INVALID', message: '手机号格式不正确（中国大陆 11 位）' });
+        }
+        if (!validatePassword(password)) {
+          return writeJson(req, res, 400, { success: false, code: 'PASSWORD_INVALID', message: '密码至少 6 位，任意字符均可' });
+        }
+
+        const [rows] = await state.pool.query('SELECT id FROM admin_user WHERE phone = ? LIMIT 1', [phone]);
+        const existed = Array.isArray(rows) && rows.length ? rows[0] : null;
+        if (existed?.id) return writeJson(req, res, 409, { success: false, code: 'PHONE_EXISTS', message: '管理员手机号已存在' });
+
+        const id = uuidv4();
+        const createdAt = new Date().toISOString();
+        const salt = crypto.randomBytes(16).toString('base64');
+        const hash = pbkdf2Hash(password, salt);
+
+        await state.pool.query(
+          'INSERT INTO admin_user (id, phone, password_salt, password_hash, created_at, last_login_at, is_superadmin, is_enabled, permission_scope) VALUES (?,?,?,?,?,?,?,?,?)',
+          [id, phone, salt, hash, createdAt, null, 0, 1, 'basic'],
+        );
+
+        const [createdRows] = await state.pool.query(
+          'SELECT id, phone, created_at, last_login_at, is_superadmin, is_enabled, permission_scope FROM admin_user WHERE id = ? LIMIT 1',
+          [id],
+        );
+        const created = Array.isArray(createdRows) && createdRows.length ? createdRows[0] : null;
+        return writeJson(req, res, 200, { success: true, admin: created ? getAdminPublic(created) : null });
+      }
+
       if (req.method === 'POST' && pathname === '/api/admin/admin-users/status') {
         const auth = await resolveAdminFromRequest(req);
         if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });

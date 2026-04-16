@@ -31,6 +31,7 @@
   - `GET /api/admin/users`
   - `POST /api/admin/users/status`
   - `GET /api/admin/admin-users`
+  - `POST /api/admin/admin-users/create`（仅超管，新增管理员：phone/password）
   - `POST /api/admin/admin-users/status`
   - `POST /api/admin/admin-users/permission`
   - 用户分页：`GET /api/admin/users?page=1&pageSize=20` → `users/page/pageSize/total`
