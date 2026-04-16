@@ -15,7 +15,8 @@
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "check-ready": "node scripts/check-app-ready.mjs",
-    "sync:skills": "node scripts/sync-third-party-skills.mjs"
+    "sync:skills": "node scripts/sync-third-party-skills.mjs",
+    "seed:admin": "node scripts/seed-admin-user.mjs"
   },
   "devDependencies": {
     "@ant-design/icons": "^6.1.0",

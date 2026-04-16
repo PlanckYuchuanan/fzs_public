@@ -142,6 +142,7 @@ function getUserPublic(userRow) {
     userId: userRow.id,
     phone: userRow.phone,
     registeredAt: userRow.created_at,
+    isEnabled: userRow.is_enabled !== 0,
   };
 }
 
@@ -213,6 +214,8 @@ function getAdminPublic(adminRow) {
     createdAt: adminRow.created_at,
     lastLoginAt: adminRow.last_login_at ?? null,
     isSuperadmin: Boolean(adminRow.is_superadmin),
+    isEnabled: adminRow.is_enabled !== 0,
+    permissionScope: typeof adminRow.permission_scope === 'string' && adminRow.permission_scope ? adminRow.permission_scope : 'basic',
   };
 }
 
@@ -262,15 +265,27 @@ async function ensureDbReady() {
   }
 
   try {
+    async function ensureColumn(tableName, columnName, alterSql) {
+      const [rows] = await state.pool.query(
+        'SELECT COUNT(*) AS c FROM information_schema.columns WHERE table_schema = ? AND table_name = ? AND column_name = ?',
+        [DB_NAME, tableName, columnName],
+      );
+      const count = Array.isArray(rows) && rows.length ? Number(rows[0]?.c || 0) : 0;
+      if (count > 0) return;
+      await state.pool.query(alterSql);
+    }
+
     await state.pool.query(`
       CREATE TABLE IF NOT EXISTS users (
         id VARCHAR(36) PRIMARY KEY,
         phone VARCHAR(20) NOT NULL UNIQUE,
         password_salt VARCHAR(64) NOT NULL,
         password_hash VARCHAR(128) NOT NULL,
-        created_at VARCHAR(32) NOT NULL
+        created_at VARCHAR(32) NOT NULL,
+        is_enabled TINYINT(1) NOT NULL DEFAULT 1
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
+    await ensureColumn('users', 'is_enabled', 'ALTER TABLE users ADD COLUMN is_enabled TINYINT(1) NOT NULL DEFAULT 1').catch(() => {});
 
     await state.pool.query('CREATE INDEX idx_users_phone ON users(phone);').catch(() => {});
 
@@ -299,9 +314,13 @@ async function ensureDbReady() {
         password_hash VARCHAR(128) NOT NULL,
         created_at VARCHAR(32) NOT NULL,
         last_login_at VARCHAR(32) NULL,
-        is_superadmin TINYINT(1) NOT NULL DEFAULT 0
+        is_superadmin TINYINT(1) NOT NULL DEFAULT 0,
+        is_enabled TINYINT(1) NOT NULL DEFAULT 1,
+        permission_scope VARCHAR(64) NOT NULL DEFAULT 'basic'
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
+    await ensureColumn('admin_user', 'is_enabled', 'ALTER TABLE admin_user ADD COLUMN is_enabled TINYINT(1) NOT NULL DEFAULT 1').catch(() => {});
+    await ensureColumn('admin_user', 'permission_scope', 'ALTER TABLE admin_user ADD COLUMN permission_scope VARCHAR(64) NOT NULL DEFAULT \'basic\'').catch(() => {});
     await state.pool.query('CREATE INDEX idx_admin_user_phone ON admin_user(phone);').catch(() => {});
 
     await state.pool.query(`
@@ -328,6 +347,35 @@ async function ensureDbReady() {
     state.dbReady = false;
     state.dbReadyMessage = e?.message || 'db_init_failed';
     return false;
+  }
+}
+
+async function resolveAdminFromRequest(req) {
+  const cookies = parseCookies(req);
+  const token = typeof cookies[ADMIN_ACCESS_COOKIE_NAME] === 'string' ? cookies[ADMIN_ACCESS_COOKIE_NAME] : '';
+  if (!token) return { ok: false, statusCode: 401, code: 'UNAUTHORIZED', message: '未登录' };
+
+  try {
+    const payload = await verifyAccessToken(token);
+    const scope = typeof payload.scope === 'string' ? payload.scope : '';
+    if (scope !== 'admin') return { ok: false, statusCode: 401, code: 'UNAUTHORIZED', message: '未登录' };
+    const adminId = typeof payload.user_id === 'string' ? payload.user_id : '';
+    if (!adminId) return { ok: false, statusCode: 401, code: 'UNAUTHORIZED', message: '未登录' };
+
+    const ok = await ensureDbReady();
+    if (!ok) return { ok: false, statusCode: 503, code: 'DB_UNAVAILABLE', message: '数据库不可用' };
+
+    const [rows] = await state.pool.query(
+      'SELECT id, phone, created_at, last_login_at, is_superadmin, is_enabled, permission_scope FROM admin_user WHERE id = ? LIMIT 1',
+      [adminId],
+    );
+    const admin = Array.isArray(rows) && rows.length ? rows[0] : null;
+    if (!admin) return { ok: false, statusCode: 401, code: 'UNAUTHORIZED', message: '未登录' };
+    if (admin.is_enabled === 0) return { ok: false, statusCode: 403, code: 'ACCOUNT_DISABLED', message: '管理员账号已停用' };
+
+    return { ok: true, admin };
+  } catch {
+    return { ok: false, statusCode: 401, code: 'UNAUTHORIZED', message: '未登录' };
   }
 }
 
@@ -402,11 +450,12 @@ async function main() {
         if (typeof password !== 'string') return writeJson(req, res, 400, { success: false, code: 'PASSWORD_REQUIRED', message: '密码不能为空' });
 
         const [rows] = await state.pool.query(
-          'SELECT id, phone, password_salt, password_hash, created_at FROM users WHERE phone = ? LIMIT 1',
+          'SELECT id, phone, password_salt, password_hash, created_at, is_enabled FROM users WHERE phone = ? LIMIT 1',
           [phone],
         );
         const user = Array.isArray(rows) && rows.length ? rows[0] : null;
         if (!user) return writeJson(req, res, 401, { success: false, code: 'INVALID_CREDENTIALS', message: '手机号或密码错误' });
+        if (user.is_enabled === 0) return writeJson(req, res, 403, { success: false, code: 'ACCOUNT_DISABLED', message: '账号已停用' });
 
         const computed = pbkdf2Hash(password, user.password_salt);
         if (computed !== user.password_hash) {
@@ -432,11 +481,12 @@ async function main() {
         if (typeof password !== 'string') return writeJson(req, res, 400, { success: false, code: 'PASSWORD_REQUIRED', message: '密码不能为空' });
 
         const [rows] = await state.pool.query(
-          'SELECT id, phone, password_salt, password_hash, created_at, last_login_at, is_superadmin FROM admin_user WHERE phone = ? LIMIT 1',
+          'SELECT id, phone, password_salt, password_hash, created_at, last_login_at, is_superadmin, is_enabled, permission_scope FROM admin_user WHERE phone = ? LIMIT 1',
           [phone],
         );
         const admin = Array.isArray(rows) && rows.length ? rows[0] : null;
         if (!admin) return writeJson(req, res, 401, { success: false, code: 'INVALID_CREDENTIALS', message: '手机号或密码错误' });
+        if (admin.is_enabled === 0) return writeJson(req, res, 403, { success: false, code: 'ACCOUNT_DISABLED', message: '管理员账号已停用' });
 
         const computed = pbkdf2Hash(password, admin.password_salt);
         if (computed !== admin.password_hash) {
@@ -474,9 +524,10 @@ async function main() {
           return writeJson(req, res, 401, { success: false, code: 'REFRESH_EXPIRED', message: '未登录' });
         }
 
-        const [userRows] = await state.pool.query('SELECT id, phone, created_at FROM users WHERE id = ? LIMIT 1', [rt.user_id]);
+        const [userRows] = await state.pool.query('SELECT id, phone, created_at, is_enabled FROM users WHERE id = ? LIMIT 1', [rt.user_id]);
         const user = Array.isArray(userRows) && userRows.length ? userRows[0] : null;
         if (!user) return writeJson(req, res, 401, { success: false, code: 'REFRESH_INVALID', message: '未登录' });
+        if (user.is_enabled === 0) return writeJson(req, res, 403, { success: false, code: 'ACCOUNT_DISABLED', message: '账号已停用' });
 
         const nextRefresh = crypto.randomBytes(32).toString('base64url');
         const nextHash = sha256Hex(nextRefresh);
@@ -527,11 +578,12 @@ async function main() {
         }
 
         const [adminRows] = await state.pool.query(
-          'SELECT id, phone, created_at, last_login_at, is_superadmin FROM admin_user WHERE id = ? LIMIT 1',
+          'SELECT id, phone, created_at, last_login_at, is_superadmin, is_enabled, permission_scope FROM admin_user WHERE id = ? LIMIT 1',
           [rt.admin_id],
         );
         const admin = Array.isArray(adminRows) && adminRows.length ? adminRows[0] : null;
         if (!admin) return writeJson(req, res, 401, { success: false, code: 'REFRESH_INVALID', message: '未登录' });
+        if (admin.is_enabled === 0) return writeJson(req, res, 403, { success: false, code: 'ACCOUNT_DISABLED', message: '管理员账号已停用' });
 
         const nextRefresh = crypto.randomBytes(32).toString('base64url');
         const nextHash = sha256Hex(nextRefresh);
@@ -605,9 +657,10 @@ async function main() {
           const ok = await ensureDbReady();
           if (!ok) return writeJson(req, res, 503, { success: false, code: 'DB_UNAVAILABLE', message: '数据库不可用' });
 
-          const [rows] = await state.pool.query('SELECT id, phone, created_at FROM users WHERE id = ? LIMIT 1', [userId]);
+          const [rows] = await state.pool.query('SELECT id, phone, created_at, is_enabled FROM users WHERE id = ? LIMIT 1', [userId]);
           const user = Array.isArray(rows) && rows.length ? rows[0] : null;
           if (!user) return writeJson(req, res, 401, { success: false, code: 'UNAUTHORIZED', message: '未登录' });
+          if (user.is_enabled === 0) return writeJson(req, res, 403, { success: false, code: 'ACCOUNT_DISABLED', message: '账号已停用' });
 
           return writeJson(req, res, 200, { success: true, user: getUserPublic(user) });
         } catch {
@@ -631,11 +684,12 @@ async function main() {
           if (!ok) return writeJson(req, res, 503, { success: false, code: 'DB_UNAVAILABLE', message: '数据库不可用' });
 
           const [rows] = await state.pool.query(
-            'SELECT id, phone, created_at, last_login_at, is_superadmin FROM admin_user WHERE id = ? LIMIT 1',
+            'SELECT id, phone, created_at, last_login_at, is_superadmin, is_enabled, permission_scope FROM admin_user WHERE id = ? LIMIT 1',
             [adminId],
           );
           const admin = Array.isArray(rows) && rows.length ? rows[0] : null;
           if (!admin) return writeJson(req, res, 401, { success: false, code: 'UNAUTHORIZED', message: '未登录' });
+          if (admin.is_enabled === 0) return writeJson(req, res, 403, { success: false, code: 'ACCOUNT_DISABLED', message: '管理员账号已停用' });
 
           return writeJson(req, res, 200, { success: true, admin: getAdminPublic(admin) });
         } catch {
@@ -647,11 +701,90 @@ async function main() {
         const ok = await ensureDbReady();
         if (!ok) return writeJson(req, res, 503, { success: false, code: 'DB_UNAVAILABLE', message: '数据库不可用' });
 
-        const [rows] = await state.pool.query('SELECT id, phone, created_at FROM users ORDER BY created_at DESC');
+        const [rows] = await state.pool.query('SELECT id, phone, created_at, is_enabled FROM users ORDER BY created_at DESC');
         const users = Array.isArray(rows)
-          ? rows.map((r) => ({ userId: r.id, phone: r.phone, registeredAt: r.created_at }))
+          ? rows.map((r) => ({ userId: r.id, phone: r.phone, registeredAt: r.created_at, isEnabled: r.is_enabled !== 0 }))
           : [];
         return writeJson(req, res, 200, { success: true, users });
+      }
+
+      if (req.method === 'GET' && pathname === '/api/admin/users') {
+        const auth = await resolveAdminFromRequest(req);
+        if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });
+
+        const pageRaw = url.searchParams.get('page') || '1';
+        const pageSizeRaw = url.searchParams.get('pageSize') || '20';
+        const page = Math.max(1, Number.parseInt(pageRaw, 10) || 1);
+        const pageSize = Math.min(100, Math.max(1, Number.parseInt(pageSizeRaw, 10) || 20));
+        const offset = (page - 1) * pageSize;
+
+        const totalRows = await state.pool.query('SELECT COUNT(*) AS total FROM users');
+        const total = Array.isArray(totalRows?.[0]) && totalRows[0].length ? Number(totalRows[0][0]?.total || 0) : 0;
+
+        const [rows] = await state.pool.query(
+          'SELECT id, phone, created_at, is_enabled FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?',
+          [pageSize, offset],
+        );
+        const users = Array.isArray(rows)
+          ? rows.map((r) => ({ userId: r.id, phone: r.phone, registeredAt: r.created_at, isEnabled: r.is_enabled !== 0 }))
+          : [];
+        return writeJson(req, res, 200, { success: true, users, page, pageSize, total });
+      }
+
+      if (req.method === 'POST' && pathname === '/api/admin/users/status') {
+        const auth = await resolveAdminFromRequest(req);
+        if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });
+
+        const body = await readJson(req);
+        const userId = typeof body?.userId === 'string' ? body.userId : '';
+        const isEnabled = Boolean(body?.isEnabled);
+        if (!userId) return writeJson(req, res, 400, { success: false, code: 'USER_ID_REQUIRED', message: '缺少用户ID' });
+
+        await state.pool.query('UPDATE users SET is_enabled = ? WHERE id = ?', [isEnabled ? 1 : 0, userId]);
+        return writeJson(req, res, 200, { success: true });
+      }
+
+      if (req.method === 'GET' && pathname === '/api/admin/admin-users') {
+        const auth = await resolveAdminFromRequest(req);
+        if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });
+
+        const [rows] = await state.pool.query('SELECT id, phone, created_at, last_login_at, is_superadmin, is_enabled, permission_scope FROM admin_user ORDER BY created_at DESC');
+        const admins = Array.isArray(rows) ? rows.map((r) => getAdminPublic(r)) : [];
+        return writeJson(req, res, 200, { success: true, admins });
+      }
+
+      if (req.method === 'POST' && pathname === '/api/admin/admin-users/status') {
+        const auth = await resolveAdminFromRequest(req);
+        if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });
+        if (!auth.admin?.is_superadmin) return writeJson(req, res, 403, { success: false, code: 'FORBIDDEN', message: '仅超管可操作管理员状态' });
+
+        const body = await readJson(req);
+        const adminId = typeof body?.adminId === 'string' ? body.adminId : '';
+        const isEnabled = Boolean(body?.isEnabled);
+        if (!adminId) return writeJson(req, res, 400, { success: false, code: 'ADMIN_ID_REQUIRED', message: '缺少管理员ID' });
+        if (adminId === auth.admin.id && !isEnabled) return writeJson(req, res, 400, { success: false, code: 'SELF_DISABLE_FORBIDDEN', message: '不能停用自己' });
+
+        await state.pool.query('UPDATE admin_user SET is_enabled = ? WHERE id = ?', [isEnabled ? 1 : 0, adminId]);
+        return writeJson(req, res, 200, { success: true });
+      }
+
+      if (req.method === 'POST' && pathname === '/api/admin/admin-users/permission') {
+        const auth = await resolveAdminFromRequest(req);
+        if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });
+        if (!auth.admin?.is_superadmin) return writeJson(req, res, 403, { success: false, code: 'FORBIDDEN', message: '仅超管可设置管理员权限' });
+
+        const body = await readJson(req);
+        const adminId = typeof body?.adminId === 'string' ? body.adminId : '';
+        const permissionScope = typeof body?.permissionScope === 'string' ? body.permissionScope.trim() : '';
+        const isSuperadmin = typeof body?.isSuperadmin === 'boolean' ? body.isSuperadmin : undefined;
+        if (!adminId) return writeJson(req, res, 400, { success: false, code: 'ADMIN_ID_REQUIRED', message: '缺少管理员ID' });
+        if (!permissionScope) return writeJson(req, res, 400, { success: false, code: 'PERMISSION_SCOPE_REQUIRED', message: '缺少权限范围' });
+
+        await state.pool.query(
+          'UPDATE admin_user SET permission_scope = ?, is_superadmin = COALESCE(?, is_superadmin) WHERE id = ?',
+          [permissionScope, typeof isSuperadmin === 'boolean' ? (isSuperadmin ? 1 : 0) : null, adminId],
+        );
+        return writeJson(req, res, 200, { success: true });
       }
 
       return writeJson(req, res, 404, { success: false, message: 'not_found' });

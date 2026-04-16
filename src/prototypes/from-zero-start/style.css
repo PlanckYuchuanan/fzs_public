@@ -448,6 +448,131 @@
   box-shadow: none;
 }
 
+.fzs-admin-root {
+  background: radial-gradient(1100px 620px at 20% 10%, rgba(255, 180, 70, 0.14), transparent 55%),
+    radial-gradient(900px 520px at 85% 20%, rgba(255, 115, 85, 0.16), transparent 55%),
+    radial-gradient(900px 520px at 55% 95%, rgba(255, 210, 90, 0.12), transparent 60%),
+    linear-gradient(180deg, #130d07, #22140d 55%, #130d07);
+}
+.fzs-admin-auth-root {
+  background: radial-gradient(1100px 620px at 20% 10%, rgba(255, 180, 70, 0.14), transparent 55%),
+    radial-gradient(900px 520px at 85% 20%, rgba(255, 115, 85, 0.16), transparent 55%),
+    radial-gradient(900px 520px at 55% 95%, rgba(255, 210, 90, 0.12), transparent 60%),
+    linear-gradient(180deg, #130d07, #22140d 55%, #130d07);
+}
+.fzs-admin-auth-root .fzs-auth-orb.a {
+  background: radial-gradient(circle at 30% 30%, rgba(255, 180, 70, 0.55), rgba(255, 180, 70, 0));
+}
+.fzs-admin-auth-root .fzs-auth-orb.b {
+  background: radial-gradient(circle at 40% 35%, rgba(255, 115, 85, 0.55), rgba(255, 115, 85, 0));
+}
+.fzs-admin-auth-root .fzs-auth-grid {
+  background-image:
+    linear-gradient(rgba(255, 210, 90, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 210, 90, 0.08) 1px, transparent 1px);
+}
+.fzs-admin-auth-root .fzs-auth-logo {
+  background: linear-gradient(135deg, rgba(255, 180, 70, 0.28), rgba(255, 115, 85, 0.28));
+  border-color: rgba(251, 191, 120, 0.22);
+}
+.fzs-admin-auth-root .fzs-auth-card {
+  border-color: rgba(251, 191, 120, 0.22);
+}
+.fzs-admin-side .fzs-nav-item.active {
+  border-color: rgba(255, 170, 90, 0.42);
+  background: linear-gradient(135deg, rgba(255, 180, 70, 0.16), rgba(255, 120, 80, 0.12));
+}
+.fzs-admin-topbar,
+.fzs-admin-panel {
+  border-color: rgba(251, 191, 120, 0.22);
+}
+.fzs-admin-panel .fzs-panel-body {
+  overflow: auto;
+}
+.fzs-admin-panel .fzs-admin-table {
+  min-width: 860px;
+}
+.fzs-admin-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: rgba(203, 213, 225, 0.78);
+}
+.fzs-admin-pager-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.fzs-admin-select {
+  border: 1px solid rgba(251, 191, 120, 0.28);
+  background: rgba(2, 6, 23, 0.22);
+  color: rgba(255, 245, 230, 0.95);
+  border-radius: 10px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 800;
+  outline: none;
+}
+.fzs-admin-select:disabled {
+  opacity: 0.6;
+}
+.fzs-admin-table {
+  display: grid;
+  gap: 8px;
+}
+.fzs-admin-row {
+  display: grid;
+  grid-template-columns: 1.4fr 1.8fr 0.9fr 0.9fr 1.8fr;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(2, 6, 23, 0.22);
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 13px;
+}
+.fzs-admin-row > div:not(.fzs-admin-actions) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fzs-admin-table.users .fzs-admin-row {
+  grid-template-columns: 1.4fr 1.8fr 0.9fr 1.0fr;
+}
+.fzs-admin-table.admins .fzs-admin-row {
+  grid-template-columns: 1.4fr 0.9fr 0.9fr 0.9fr 1.8fr;
+}
+.fzs-admin-row.header {
+  background: rgba(251, 191, 120, 0.12);
+  border-color: rgba(251, 191, 120, 0.24);
+  font-weight: 900;
+}
+.fzs-admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.fzs-admin-mini {
+  border: 1px solid rgba(251, 191, 120, 0.28);
+  background: rgba(251, 191, 120, 0.12);
+  color: rgba(255, 245, 230, 0.95);
+  border-radius: 10px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.fzs-admin-mini:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .fzs-primary-button:hover {
   filter: brightness(0.98);
   box-shadow: 0 12px 30px rgba(110, 139, 255, 0.32);
