@@ -8,7 +8,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Action, AxureHandle, AxureProps, ConfigItem, DataDesc, EventItem, KeyDesc } from '../../common/axure-types';
 
 const EVENT_LIST: EventItem[] = [
-  { name: 'onCreateTask', desc: '点击“创建任务”按钮时触发' },
+  { name: 'onCreateCustomer', desc: '点击“新增客户”按钮时触发' },
 ];
 
 const ACTION_LIST: Action[] = [];
@@ -21,7 +21,7 @@ const DATA_LIST: DataDesc[] = [];
 
 const NAV_ITEMS: Array<{ id: string; label: string; desc: string }> = [
   { id: 'dashboard', label: '仪表盘', desc: '概览与关键指标（占位）' },
-  { id: 'tasks', label: '任务中心', desc: '任务与流程（占位）' },
+  { id: 'customers', label: '客户管理', desc: '客户列表与跟进（占位）' },
   { id: 'projects', label: '项目管理', desc: '项目与资源（占位）' },
   { id: 'analytics', label: '数据分析', desc: '报表与分析（占位）' },
   { id: 'settings', label: '系统设置', desc: '权限与配置（占位）' },
@@ -72,9 +72,9 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
     return { res, json };
   }, [apiBaseUrl]);
 
-  const handleCreateTask = useCallback(function () {
+  const handleCreateCustomer = useCallback(function () {
     try {
-      onEvent('onCreateTask', '{}');
+      onEvent('onCreateCustomer', '{}');
     } catch {}
   }, [onEvent]);
 
@@ -294,9 +294,9 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
                 <div className="fzs-panel-title">{activeNav.label}</div>
                 <div className="fzs-panel-desc">{activeNav.desc}</div>
               </div>
-              {activeNav.id === 'tasks' && (
-                <button className="fzs-primary-button dark" type="button" onClick={handleCreateTask}>
-                  创建任务
+              {activeNav.id === 'customers' && (
+                <button className="fzs-primary-button dark" type="button" onClick={handleCreateCustomer}>
+                  新增客户
                 </button>
               )}
             </div>
@@ -308,10 +308,10 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
                   <div className="fzs-empty-desc">这里将展示你的核心数据与快捷入口。</div>
                 </div>
               )}
-              {activeNav.id === 'tasks' && (
+              {activeNav.id === 'customers' && (
                 <div className="fzs-empty-block">
-                  <div className="fzs-empty-title">任务中心</div>
-                  <div className="fzs-empty-desc">后续会在这里扩展任务列表、详情与状态流转。</div>
+                  <div className="fzs-empty-title">客户管理</div>
+                  <div className="fzs-empty-desc">客户数据将由你这边定义并接入。</div>
                 </div>
               )}
               {activeNav.id === 'projects' && (
