@@ -31,6 +31,32 @@ type UserRow = {
   isEnabled: boolean;
 };
 
+type ProductServiceTypeRow = {
+  typeId: string;
+  name: string;
+  wbsCode: string;
+  createdAt: string;
+};
+
+type ProductServiceRow = {
+  serviceId: string;
+  typeId: string;
+  name: string;
+  wbsCode: string;
+  description: string;
+  referenceWeeks: number;
+  ownerText: string;
+  isEnabled: boolean;
+  createdAt: string;
+};
+
+const ADMIN_NAV_ITEMS: Array<{ id: 'customers' | 'products' | 'users' | 'admins'; label: string; desc: string }> = [
+  { id: 'customers', label: '客户管理', desc: '客户与线索（待定义）' },
+  { id: 'products', label: '产品和服务管理', desc: '产品、服务与配置（待定义）' },
+  { id: 'users', label: '用户管理', desc: '管理 user 表账号状态' },
+  { id: 'admins', label: '管理员', desc: '管理 admin_user 状态与权限' },
+];
+
 function mapAdminLoginError(res: Response, json: any): string {
   const code = typeof json?.code === 'string' ? json.code : '';
   if (code === 'INVALID_CREDENTIALS') return '手机号或密码错误';
@@ -49,7 +75,8 @@ function mapAdminApiError(res: Response, json: any, fallback: string): string {
 }
 
 const Component = React.forwardRef<AxureHandle, AxureProps>(function AdminLogin(innerProps, ref) {
-  const [navId, setNavId] = useState<'users' | 'admins'>('users');
+  const [navId, setNavId] = useState<'customers' | 'products' | 'users' | 'admins'>('users');
+  const [productsTabId, setProductsTabId] = useState<'services' | 'types'>('services');
   const [phone, setPhone] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [error, setError] = useState<string>('');
@@ -60,6 +87,25 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function AdminLogin(
   const [usersPageSize, setUsersPageSize] = useState<number>(20);
   const [usersTotal, setUsersTotal] = useState<number>(0);
   const [admins, setAdmins] = useState<AdminProfile[]>([]);
+  const [productServiceTypes, setProductServiceTypes] = useState<ProductServiceTypeRow[]>([]);
+  const [productServices, setProductServices] = useState<ProductServiceRow[]>([]);
+  const [serviceModalOpen, setServiceModalOpen] = useState<boolean>(false);
+  const [serviceModalMode, setServiceModalMode] = useState<'create' | 'edit'>('create');
+  const [serviceModalBusy, setServiceModalBusy] = useState<boolean>(false);
+  const [serviceIdEditing, setServiceIdEditing] = useState<string>('');
+  const [serviceTypeId, setServiceTypeId] = useState<string>('');
+  const [serviceName, setServiceName] = useState<string>('');
+  const [serviceWbsCode, setServiceWbsCode] = useState<string>('');
+  const [serviceDescription, setServiceDescription] = useState<string>('');
+  const [serviceReferenceWeeks, setServiceReferenceWeeks] = useState<string>('0');
+  const [serviceOwnerText, setServiceOwnerText] = useState<string>('');
+  const [serviceIsEnabled, setServiceIsEnabled] = useState<boolean>(true);
+  const [typeModalOpen, setTypeModalOpen] = useState<boolean>(false);
+  const [typeModalMode, setTypeModalMode] = useState<'create' | 'edit'>('create');
+  const [typeModalBusy, setTypeModalBusy] = useState<boolean>(false);
+  const [typeIdEditing, setTypeIdEditing] = useState<string>('');
+  const [typeName, setTypeName] = useState<string>('');
+  const [typeWbsCode, setTypeWbsCode] = useState<string>('');
   const [panelBusy, setPanelBusy] = useState<boolean>(false);
   const [createAdminOpen, setCreateAdminOpen] = useState<boolean>(false);
   const [createAdminPhone, setCreateAdminPhone] = useState<string>('');
@@ -190,19 +236,41 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function AdminLogin(
     throw new Error(mapAdminApiError(res, json, '加载管理员失败'));
   }, [fetchJson]);
 
-  const refreshPanel = useCallback(async function (target: 'users' | 'admins') {
+  const loadProductServiceTypes = useCallback(async function () {
+    const { res, json } = await fetchJson('/api/admin/product-service-types', { method: 'GET' });
+    if (res.ok && json?.success && Array.isArray(json.types)) {
+      setProductServiceTypes(json.types);
+      return;
+    }
+    throw new Error(mapAdminApiError(res, json, '加载产品服务类型失败'));
+  }, [fetchJson]);
+
+  const loadProductServices = useCallback(async function () {
+    const { res, json } = await fetchJson('/api/admin/product-services', { method: 'GET' });
+    if (res.ok && json?.success && Array.isArray(json.services)) {
+      setProductServices(json.services);
+      return;
+    }
+    throw new Error(mapAdminApiError(res, json, '加载产品服务失败'));
+  }, [fetchJson]);
+
+  const refreshPanel = useCallback(async function (target: 'customers' | 'products' | 'users' | 'admins') {
     if (!admin) return;
     setPanelBusy(true);
     setError('');
     try {
       if (target === 'users') await loadUsers(usersPage, usersPageSize);
       if (target === 'admins') await loadAdmins();
+      if (target === 'products' && productsTabId === 'types') await loadProductServiceTypes();
+      if (target === 'products' && productsTabId === 'services') {
+        await Promise.all([loadProductServices(), loadProductServiceTypes()]);
+      }
     } catch (e: any) {
       setError(e?.message || '加载失败');
     } finally {
       setPanelBusy(false);
     }
-  }, [admin, loadAdmins, loadUsers, usersPage, usersPageSize]);
+  }, [admin, loadAdmins, loadProductServiceTypes, loadProductServices, loadUsers, productsTabId, usersPage, usersPageSize]);
 
   const goUsersPage = useCallback(async function (nextPage: number) {
     if (!admin) return;
@@ -304,6 +372,180 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function AdminLogin(
     }
   }, [fetchJson, loadAdmins, loadMe]);
 
+  const openCreateType = useCallback(function () {
+    setTypeModalMode('create');
+    setTypeIdEditing('');
+    setTypeName('');
+    setTypeWbsCode('');
+    setTypeModalOpen(true);
+  }, []);
+
+  const openEditType = useCallback(function (row: ProductServiceTypeRow) {
+    setTypeModalMode('edit');
+    setTypeIdEditing(row.typeId);
+    setTypeName(row.name);
+    setTypeWbsCode(row.wbsCode || '');
+    setTypeModalOpen(true);
+  }, []);
+
+  const openCreateService = useCallback(async function () {
+    setServiceModalMode('create');
+    setServiceIdEditing('');
+    setServiceTypeId('');
+    setServiceName('');
+    setServiceWbsCode('');
+    setServiceDescription('');
+    setServiceReferenceWeeks('0');
+    setServiceOwnerText('');
+    setServiceIsEnabled(true);
+    setServiceModalOpen(true);
+    try {
+      await loadProductServiceTypes();
+    } catch {}
+  }, [loadProductServiceTypes]);
+
+  const openEditService = useCallback(async function (row: ProductServiceRow) {
+    setServiceModalMode('edit');
+    setServiceIdEditing(row.serviceId);
+    setServiceTypeId(row.typeId || '');
+    setServiceName(row.name);
+    setServiceWbsCode(row.wbsCode);
+    setServiceDescription(row.description || '');
+    setServiceReferenceWeeks(String(row.referenceWeeks ?? 0));
+    setServiceOwnerText(row.ownerText || '');
+    setServiceIsEnabled(Boolean(row.isEnabled));
+    setServiceModalOpen(true);
+    try {
+      await loadProductServiceTypes();
+    } catch {}
+  }, [loadProductServiceTypes]);
+
+  const submitServiceModal = useCallback(async function () {
+    const name = serviceName.trim();
+    const wbsCode = serviceWbsCode.trim();
+    const description = serviceDescription.trim();
+    const ownerText = serviceOwnerText.trim();
+    const referenceWeeks = Number.parseInt(serviceReferenceWeeks.trim() || '0', 10);
+
+    if (!name) {
+      setError('请输入产品服务名称');
+      return;
+    }
+    if (name.length > 128) {
+      setError('产品服务名称过长（最多 128 字符）');
+      return;
+    }
+    if (!wbsCode) {
+      setError('请输入WBS编码');
+      return;
+    }
+    if (wbsCode.length > 64) {
+      setError('WBS编码过长（最多 64 字符）');
+      return;
+    }
+    if (!Number.isFinite(referenceWeeks) || referenceWeeks < 0) {
+      setError('参考时间（周）不合法');
+      return;
+    }
+    if (ownerText.length > 128) {
+      setError('责任方过长（最多 128 字符）');
+      return;
+    }
+
+    setServiceModalBusy(true);
+    setError('');
+    try {
+      const payload = {
+        typeId: serviceTypeId,
+        name,
+        wbsCode,
+        description,
+        referenceWeeks,
+        ownerText,
+        isEnabled: serviceIsEnabled,
+      };
+
+      if (serviceModalMode === 'create') {
+        const { res, json } = await fetchJson('/api/admin/product-services/create', { method: 'POST', body: JSON.stringify(payload) });
+        if (!res.ok || !json?.success) throw new Error(mapAdminApiError(res, json, '添加失败'));
+      } else {
+        const { res, json } = await fetchJson('/api/admin/product-services/update', { method: 'POST', body: JSON.stringify({ serviceId: serviceIdEditing, ...payload }) });
+        if (!res.ok || !json?.success) throw new Error(mapAdminApiError(res, json, '保存失败'));
+      }
+
+      await loadProductServices();
+      setServiceModalOpen(false);
+    } catch (e: any) {
+      setError(e?.message || '操作失败');
+    } finally {
+      setServiceModalBusy(false);
+    }
+  }, [fetchJson, loadProductServices, serviceDescription, serviceIdEditing, serviceIsEnabled, serviceModalMode, serviceName, serviceOwnerText, serviceReferenceWeeks, serviceTypeId, serviceWbsCode]);
+
+  const deleteService = useCallback(async function (row: ProductServiceRow) {
+    if (!window.confirm(`确定删除产品服务「${row.name}」吗？`)) return;
+    setPanelBusy(true);
+    setError('');
+    try {
+      const { res, json } = await fetchJson('/api/admin/product-services/delete', { method: 'POST', body: JSON.stringify({ serviceId: row.serviceId }) });
+      if (!res.ok || !json?.success) throw new Error(mapAdminApiError(res, json, '删除失败'));
+      await loadProductServices();
+    } catch (e: any) {
+      setError(e?.message || '删除失败');
+    } finally {
+      setPanelBusy(false);
+    }
+  }, [fetchJson, loadProductServices]);
+  const submitTypeModal = useCallback(async function () {
+    const name = typeName.trim();
+    const wbsCode = typeWbsCode.trim();
+    if (!name) {
+      setError('请输入类型名称');
+      return;
+    }
+    if (name.length > 64) {
+      setError('类型名称过长（最多 64 字符）');
+      return;
+    }
+    if (wbsCode.length > 64) {
+      setError('WBS代码过长（最多 64 字符）');
+      return;
+    }
+
+    setTypeModalBusy(true);
+    setError('');
+    try {
+      if (typeModalMode === 'create') {
+        const { res, json } = await fetchJson('/api/admin/product-service-types/create', { method: 'POST', body: JSON.stringify({ name, wbsCode }) });
+        if (!res.ok || !json?.success) throw new Error(mapAdminApiError(res, json, '添加失败'));
+      } else {
+        const { res, json } = await fetchJson('/api/admin/product-service-types/update', { method: 'POST', body: JSON.stringify({ typeId: typeIdEditing, name, wbsCode }) });
+        if (!res.ok || !json?.success) throw new Error(mapAdminApiError(res, json, '保存失败'));
+      }
+      await loadProductServiceTypes();
+      setTypeModalOpen(false);
+    } catch (e: any) {
+      setError(e?.message || '操作失败');
+    } finally {
+      setTypeModalBusy(false);
+    }
+  }, [fetchJson, loadProductServiceTypes, typeIdEditing, typeModalMode, typeName, typeWbsCode]);
+
+  const deleteType = useCallback(async function (row: ProductServiceTypeRow) {
+    if (!window.confirm(`确定删除产品服务类型「${row.name}」吗？`)) return;
+    setPanelBusy(true);
+    setError('');
+    try {
+      const { res, json } = await fetchJson('/api/admin/product-service-types/delete', { method: 'POST', body: JSON.stringify({ typeId: row.typeId }) });
+      if (!res.ok || !json?.success) throw new Error(mapAdminApiError(res, json, '删除失败'));
+      await loadProductServiceTypes();
+    } catch (e: any) {
+      setError(e?.message || '删除失败');
+    } finally {
+      setPanelBusy(false);
+    }
+  }, [fetchJson, loadProductServiceTypes]);
+
   const submitCreateAdmin = useCallback(async function () {
     const trimmedPhone = createAdminPhone.trim().replace(/[\s-]/g, '').replace(/^\+?86/, '');
     const pwd = createAdminPassword;
@@ -373,6 +615,8 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function AdminLogin(
     const usersTotalPages = Math.max(1, Math.ceil(usersTotal / usersPageSize));
     const canUsersPrev = usersPage > 1;
     const canUsersNext = usersPage < usersTotalPages;
+    const activeNav = ADMIN_NAV_ITEMS.find((x) => x.id === navId) ?? ADMIN_NAV_ITEMS[0];
+    const typeNameById = new Map(productServiceTypes.map((t) => [t.typeId, t.name] as const));
 
     return (
       <div className="fzs-app-root fzs-admin-root">
@@ -387,21 +631,19 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function AdminLogin(
             </div>
           </div>
           <nav className="fzs-side-nav" aria-label="管理员导航">
-            <button className={navId === 'users' ? 'fzs-nav-item active' : 'fzs-nav-item'} type="button" onClick={() => setNavId('users')}>
-              <div className="fzs-nav-label">用户管理</div>
-              <div className="fzs-nav-desc">管理 user 表账号状态</div>
-            </button>
-            <button className={navId === 'admins' ? 'fzs-nav-item active' : 'fzs-nav-item'} type="button" onClick={() => setNavId('admins')}>
-              <div className="fzs-nav-label">管理员</div>
-              <div className="fzs-nav-desc">管理 admin_user 状态与权限</div>
-            </button>
+            {ADMIN_NAV_ITEMS.map((item) => (
+              <button key={item.id} className={navId === item.id ? 'fzs-nav-item active' : 'fzs-nav-item'} type="button" onClick={() => setNavId(item.id)}>
+                <div className="fzs-nav-label">{item.label}</div>
+                <div className="fzs-nav-desc">{item.desc}</div>
+              </button>
+            ))}
           </nav>
         </aside>
 
         <div className="fzs-main">
           <header className="fzs-main-topbar fzs-admin-topbar">
             <div className="fzs-main-title">
-              <div className="fzs-main-title-text">{navId === 'users' ? '用户管理' : '管理员'}</div>
+              <div className="fzs-main-title-text">{activeNav.label}</div>
               <div className="fzs-main-title-sub">{admin.phone}{admin.isSuperadmin ? '（超管）' : ''}</div>
             </div>
             <div className="fzs-user-area">
@@ -414,13 +656,45 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function AdminLogin(
             <div className="fzs-panel fzs-admin-panel">
               <div className="fzs-panel-head">
                 <div className="fzs-panel-head-left">
-                  <div className="fzs-panel-title">{navId === 'users' ? '用户管理' : '管理员管理'}</div>
-                  <div className="fzs-panel-desc">{navId === 'users' ? '可启用/停用普通用户，停用后不可登录' : '可启用/停用管理员，并设置权限范围'}</div>
+                  <div className="fzs-panel-title">{activeNav.label}</div>
+                  <div className="fzs-panel-desc">{activeNav.desc}</div>
+                  {navId === 'products' && (
+                    <div className="fzs-admin-tabs" role="tablist" aria-label="产品和服务管理">
+                      <button
+                        className={productsTabId === 'services' ? 'fzs-admin-tab active' : 'fzs-admin-tab'}
+                        type="button"
+                        role="tab"
+                        aria-selected={productsTabId === 'services'}
+                        onClick={() => setProductsTabId('services')}
+                      >
+                        产品服务
+                      </button>
+                      <button
+                        className={productsTabId === 'types' ? 'fzs-admin-tab active' : 'fzs-admin-tab'}
+                        type="button"
+                        role="tab"
+                        aria-selected={productsTabId === 'types'}
+                        onClick={() => setProductsTabId('types')}
+                      >
+                        产品服务类型
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <div className="fzs-admin-actions">
                   {navId === 'admins' && admin.isSuperadmin && (
                     <button className="fzs-primary-button dark" type="button" onClick={() => setCreateAdminOpen(true)} disabled={panelBusy}>
                       添加管理员
+                    </button>
+                  )}
+                  {navId === 'products' && productsTabId === 'services' && (
+                    <button className="fzs-primary-button dark" type="button" onClick={() => void openCreateService()} disabled={panelBusy}>
+                      添加产品服务
+                    </button>
+                  )}
+                  {navId === 'products' && productsTabId === 'types' && (
+                    <button className="fzs-primary-button dark" type="button" onClick={openCreateType} disabled={panelBusy}>
+                      添加类型
                     </button>
                   )}
                   <button className="fzs-primary-button dark" type="button" onClick={() => void refreshPanel(navId)} disabled={panelBusy}>
@@ -431,6 +705,66 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function AdminLogin(
 
               <div className="fzs-panel-body">
                 {error && <div className="fzs-error">{error}</div>}
+
+                {navId === 'customers' && (
+                  <div className="fzs-empty-block">
+                    <div className="fzs-empty-title">客户管理</div>
+                    <div className="fzs-empty-desc">内容区域待你定义接入。</div>
+                  </div>
+                )}
+
+                {navId === 'products' && (
+                  <>
+                    {productsTabId === 'services' && (
+                      <div className="fzs-admin-table psservices">
+                        <div className="fzs-admin-row header">
+                          <div>ID</div><div>产品服务名称</div><div>WBS编码</div><div>类型</div><div>参考时间（周）</div><div>状态</div><div>操作</div>
+                        </div>
+                        {productServices.map((s) => (
+                          <div key={s.serviceId} className="fzs-admin-row">
+                            <div>{s.serviceId}</div>
+                            <div>{s.name}</div>
+                            <div>{s.wbsCode}</div>
+                            <div>{s.typeId ? (typeNameById.get(s.typeId) || s.typeId) : '-'}</div>
+                            <div>{s.referenceWeeks}</div>
+                            <div>{s.isEnabled ? '启用' : '停用'}</div>
+                            <div className="fzs-admin-actions">
+                              <button className="fzs-admin-mini" type="button" onClick={() => void openEditService(s)} disabled={panelBusy}>
+                                编辑
+                              </button>
+                              <button className="fzs-admin-mini" type="button" onClick={() => void deleteService(s)} disabled={panelBusy}>
+                                删除
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {productsTabId === 'types' && (
+                      <div className="fzs-admin-table pstypes">
+                        <div className="fzs-admin-row header">
+                          <div>ID</div><div>名称</div><div>WBS代码</div><div>创建时间</div><div>操作</div>
+                        </div>
+                        {productServiceTypes.map((t) => (
+                          <div key={t.typeId} className="fzs-admin-row">
+                            <div>{t.typeId}</div>
+                            <div>{t.name}</div>
+                            <div>{t.wbsCode || '-'}</div>
+                            <div>{t.createdAt}</div>
+                            <div className="fzs-admin-actions">
+                              <button className="fzs-admin-mini" type="button" onClick={() => openEditType(t)} disabled={panelBusy}>
+                                编辑
+                              </button>
+                              <button className="fzs-admin-mini" type="button" onClick={() => void deleteType(t)} disabled={panelBusy}>
+                                删除
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
 
                 {navId === 'users' && (
                   <div className="fzs-admin-table users">
@@ -502,8 +836,8 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function AdminLogin(
           </main>
         </div>
         {createAdminOpen && (
-          <div className="fzs-modal-backdrop" role="dialog" aria-modal="true">
-            <div className="fzs-modal">
+          <div className="fzs-modal-backdrop fzs-admin-modal-backdrop" role="dialog" aria-modal="true">
+            <div className="fzs-modal fzs-admin-modal">
               <div className="fzs-modal-header">
                 <div className="fzs-modal-title">添加管理员</div>
                 <button className="fzs-modal-close" type="button" onClick={() => setCreateAdminOpen(false)} disabled={createAdminBusy}>×</button>
@@ -511,17 +845,97 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function AdminLogin(
               <div className="fzs-modal-body">
                 <div className="fzs-field">
                   <div className="fzs-label">管理员手机号</div>
-                  <input className="fzs-input" value={createAdminPhone} onChange={(e) => setCreateAdminPhone(e.target.value)} placeholder="请输入手机号" />
+                  <input className="fzs-input dark" value={createAdminPhone} onChange={(e) => setCreateAdminPhone(e.target.value)} placeholder="请输入手机号" />
                 </div>
                 <div className="fzs-field">
                   <div className="fzs-label">密码</div>
-                  <input className="fzs-input" value={createAdminPassword} onChange={(e) => setCreateAdminPassword(e.target.value)} placeholder="请输入密码（至少 6 位）" type="password" />
+                  <input className="fzs-input dark" value={createAdminPassword} onChange={(e) => setCreateAdminPassword(e.target.value)} placeholder="请输入密码（至少 6 位）" type="password" />
                 </div>
               </div>
               <div className="fzs-modal-footer">
-                <button className="fzs-btn-secondary" type="button" onClick={() => setCreateAdminOpen(false)} disabled={createAdminBusy}>取消</button>
-                <button className="fzs-btn-primary" type="button" onClick={() => void submitCreateAdmin()} disabled={createAdminBusy}>
+                <button className="fzs-admin-mini" type="button" onClick={() => setCreateAdminOpen(false)} disabled={createAdminBusy}>取消</button>
+                <button className="fzs-primary-button dark" type="button" onClick={() => void submitCreateAdmin()} disabled={createAdminBusy}>
                   {createAdminBusy ? '添加中...' : '确认添加'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {typeModalOpen && (
+          <div className="fzs-modal-backdrop fzs-admin-modal-backdrop" role="dialog" aria-modal="true">
+            <div className="fzs-modal fzs-admin-modal">
+              <div className="fzs-modal-header">
+                <div className="fzs-modal-title">{typeModalMode === 'create' ? '添加产品服务类型' : '编辑产品服务类型'}</div>
+                <button className="fzs-modal-close" type="button" onClick={() => setTypeModalOpen(false)} disabled={typeModalBusy}>×</button>
+              </div>
+              <div className="fzs-modal-body">
+                <div className="fzs-field">
+                  <div className="fzs-label">类型名称</div>
+                  <input className="fzs-input dark" value={typeName} onChange={(e) => setTypeName(e.target.value)} placeholder="请输入名称" />
+                </div>
+                <div className="fzs-field">
+                  <div className="fzs-label">WBS代码</div>
+                  <input className="fzs-input dark" value={typeWbsCode} onChange={(e) => setTypeWbsCode(e.target.value)} placeholder="可重复" />
+                </div>
+              </div>
+              <div className="fzs-modal-footer">
+                <button className="fzs-admin-mini" type="button" onClick={() => setTypeModalOpen(false)} disabled={typeModalBusy}>取消</button>
+                <button className="fzs-primary-button dark" type="button" onClick={() => void submitTypeModal()} disabled={typeModalBusy}>
+                  {typeModalBusy ? '保存中...' : '保存'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {serviceModalOpen && (
+          <div className="fzs-modal-backdrop fzs-admin-modal-backdrop" role="dialog" aria-modal="true">
+            <div className="fzs-modal fzs-admin-modal">
+              <div className="fzs-modal-header">
+                <div className="fzs-modal-title">{serviceModalMode === 'create' ? '添加产品服务' : '编辑产品服务'}</div>
+                <button className="fzs-modal-close" type="button" onClick={() => setServiceModalOpen(false)} disabled={serviceModalBusy}>×</button>
+              </div>
+              <div className="fzs-modal-body">
+                <div className="fzs-field">
+                  <div className="fzs-label">产品服务名称</div>
+                  <input className="fzs-input dark" value={serviceName} onChange={(e) => setServiceName(e.target.value)} placeholder="请输入名称（不可重复）" />
+                </div>
+                <div className="fzs-field">
+                  <div className="fzs-label">WBS编码</div>
+                  <input className="fzs-input dark" value={serviceWbsCode} onChange={(e) => setServiceWbsCode(e.target.value)} placeholder="请输入WBS编码（不可重复）" />
+                </div>
+                <div className="fzs-field">
+                  <div className="fzs-label">产品服务类型</div>
+                  <select className="fzs-admin-select" value={serviceTypeId} onChange={(e) => setServiceTypeId(e.target.value)}>
+                    <option value="">未设置</option>
+                    {productServiceTypes.map((t) => (
+                      <option key={t.typeId} value={t.typeId}>{t.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="fzs-field">
+                  <div className="fzs-label">描述</div>
+                  <input className="fzs-input dark" value={serviceDescription} onChange={(e) => setServiceDescription(e.target.value)} placeholder="可选" />
+                </div>
+                <div className="fzs-field">
+                  <div className="fzs-label">参考时间（周）</div>
+                  <input className="fzs-input dark" value={serviceReferenceWeeks} onChange={(e) => setServiceReferenceWeeks(e.target.value)} placeholder="例如：4" inputMode="numeric" />
+                </div>
+                <div className="fzs-field">
+                  <div className="fzs-label">责任方</div>
+                  <input className="fzs-input dark" value={serviceOwnerText} onChange={(e) => setServiceOwnerText(e.target.value)} placeholder="仅文本描述" />
+                </div>
+                <div className="fzs-field">
+                  <div className="fzs-label">启用状态</div>
+                  <select className="fzs-admin-select" value={serviceIsEnabled ? '1' : '0'} onChange={(e) => setServiceIsEnabled(e.target.value === '1')}>
+                    <option value="1">启用</option>
+                    <option value="0">停用</option>
+                  </select>
+                </div>
+              </div>
+              <div className="fzs-modal-footer">
+                <button className="fzs-admin-mini" type="button" onClick={() => setServiceModalOpen(false)} disabled={serviceModalBusy}>取消</button>
+                <button className="fzs-primary-button dark" type="button" onClick={() => void submitServiceModal()} disabled={serviceModalBusy}>
+                  {serviceModalBusy ? '保存中...' : '保存'}
                 </button>
               </div>
             </div>

@@ -627,6 +627,12 @@
 .fzs-admin-table.admins .fzs-admin-row {
   grid-template-columns: 1.4fr 0.9fr 0.9fr 0.9fr 1.8fr;
 }
+.fzs-admin-table.pstypes .fzs-admin-row {
+  grid-template-columns: 1.6fr 1.4fr 1.0fr 1.2fr 1.8fr;
+}
+.fzs-admin-table.psservices .fzs-admin-row {
+  grid-template-columns: 1.6fr 1.4fr 1.0fr 1.1fr 0.8fr 0.8fr 1.8fr;
+}
 .fzs-admin-row.header {
   background: rgba(251, 191, 120, 0.12);
   border-color: rgba(251, 191, 120, 0.24);
@@ -636,6 +642,31 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+.fzs-admin-tabs {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.fzs-admin-tab {
+  appearance: none;
+  border: 1px solid rgba(251, 191, 120, 0.22);
+  background: rgba(2, 6, 23, 0.22);
+  color: rgba(255, 245, 230, 0.92);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+.fzs-admin-tab:hover {
+  border-color: rgba(251, 191, 120, 0.35);
+  background: rgba(251, 191, 120, 0.10);
+}
+.fzs-admin-tab.active {
+  border-color: rgba(255, 170, 90, 0.42);
+  background: linear-gradient(135deg, rgba(255, 180, 70, 0.16), rgba(255, 120, 80, 0.12));
 }
 .fzs-admin-mini {
   border: 1px solid rgba(251, 191, 120, 0.28);
@@ -771,4 +802,43 @@
 .fzs-btn-primary:disabled {
   opacity: 0.7;
   cursor: not-allowed;
+}
+
+.fzs-admin-modal-backdrop {
+  background: rgba(19, 13, 7, 0.66);
+}
+.fzs-admin-modal {
+  background: rgba(2, 6, 23, 0.22);
+  border-color: rgba(251, 191, 120, 0.22);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(14px);
+}
+.fzs-admin-modal .fzs-modal-header {
+  background: rgba(251, 191, 120, 0.12);
+  border-bottom-color: rgba(251, 191, 120, 0.20);
+}
+.fzs-admin-modal .fzs-modal-title {
+  color: rgba(255, 255, 255, 0.92);
+}
+.fzs-admin-modal .fzs-modal-close {
+  color: rgba(255, 245, 230, 0.92);
+}
+.fzs-admin-modal .fzs-modal-close:hover {
+  background: rgba(251, 191, 120, 0.12);
+}
+.fzs-admin-modal .fzs-modal-footer {
+  background: transparent;
+  border-top-color: rgba(251, 191, 120, 0.16);
+}
+.fzs-admin-modal .fzs-label {
+  color: rgba(226, 232, 240, 0.88);
+}
+.fzs-admin-modal .fzs-primary-button.dark {
+  background: linear-gradient(135deg, rgba(255, 180, 70, 0.20), rgba(255, 115, 85, 0.16));
+  border-color: rgba(251, 191, 120, 0.28);
+  color: rgba(255, 245, 230, 0.96);
+}
+.fzs-admin-modal .fzs-primary-button.dark:focus-visible {
+  outline: 3px solid rgba(251, 191, 120, 0.22);
+  outline-offset: 3px;
 }

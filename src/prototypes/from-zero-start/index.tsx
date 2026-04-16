@@ -23,6 +23,8 @@ const NAV_ITEMS: Array<{ id: string; label: string; desc: string }> = [
   { id: 'dashboard', label: '仪表盘', desc: '概览与关键指标（占位）' },
   { id: 'customers', label: '客户管理', desc: '客户列表与跟进（占位）' },
   { id: 'projects', label: '项目管理', desc: '项目与资源（占位）' },
+  { id: 'orders', label: '制单管理', desc: '制单与流程（占位）' },
+  { id: 'products', label: '产品服务', desc: '产品与服务（占位）' },
   { id: 'analytics', label: '数据分析', desc: '报表与分析（占位）' },
   { id: 'settings', label: '系统设置', desc: '权限与配置（占位）' },
 ];
@@ -318,6 +320,18 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
                 <div className="fzs-empty-block">
                   <div className="fzs-empty-title">项目管理</div>
                   <div className="fzs-empty-desc">后续会在这里扩展项目、成员、资源与里程碑。</div>
+                </div>
+              )}
+              {activeNav.id === 'orders' && (
+                <div className="fzs-empty-block">
+                  <div className="fzs-empty-title">制单管理</div>
+                  <div className="fzs-empty-desc">功能与数据将由你这边定义并接入。</div>
+                </div>
+              )}
+              {activeNav.id === 'products' && (
+                <div className="fzs-empty-block">
+                  <div className="fzs-empty-title">产品服务</div>
+                  <div className="fzs-empty-desc">功能与数据将由你这边定义并接入。</div>
                 </div>
               )}
               {activeNav.id === 'analytics' && (

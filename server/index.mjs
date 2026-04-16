@@ -340,6 +340,39 @@ async function ensureDbReady() {
     await state.pool.query('CREATE INDEX idx_admin_refresh_tokens_admin ON admin_refresh_tokens(admin_id);').catch(() => {});
     await state.pool.query('CREATE INDEX idx_admin_refresh_tokens_device ON admin_refresh_tokens(device_id);').catch(() => {});
 
+    await state.pool.query(`
+      CREATE TABLE IF NOT EXISTS product_service_types (
+        id VARCHAR(36) PRIMARY KEY,
+        name VARCHAR(64) NOT NULL,
+        wbs_code VARCHAR(64) NULL,
+        created_at VARCHAR(32) NOT NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+    await ensureColumn('product_service_types', 'wbs_code', 'ALTER TABLE product_service_types ADD COLUMN wbs_code VARCHAR(64) NULL').catch(() => {});
+    await state.pool.query('CREATE UNIQUE INDEX idx_product_service_types_name ON product_service_types(name);').catch(() => {});
+
+    await state.pool.query(`
+      CREATE TABLE IF NOT EXISTS product_services (
+        id VARCHAR(36) PRIMARY KEY,
+        type_id VARCHAR(36) NULL,
+        name VARCHAR(128) NOT NULL,
+        wbs_code VARCHAR(64) NOT NULL,
+        description TEXT NULL,
+        reference_weeks INT NOT NULL DEFAULT 0,
+        owner_text VARCHAR(128) NULL,
+        is_enabled TINYINT(1) NOT NULL DEFAULT 1,
+        created_at VARCHAR(32) NOT NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+    await ensureColumn('product_services', 'wbs_code', 'ALTER TABLE product_services ADD COLUMN wbs_code VARCHAR(64) NULL').catch(() => {});
+    await ensureColumn('product_services', 'description', 'ALTER TABLE product_services ADD COLUMN description TEXT NULL').catch(() => {});
+    await ensureColumn('product_services', 'reference_weeks', 'ALTER TABLE product_services ADD COLUMN reference_weeks INT NOT NULL DEFAULT 0').catch(() => {});
+    await ensureColumn('product_services', 'owner_text', 'ALTER TABLE product_services ADD COLUMN owner_text VARCHAR(128) NULL').catch(() => {});
+    await ensureColumn('product_services', 'is_enabled', 'ALTER TABLE product_services ADD COLUMN is_enabled TINYINT(1) NOT NULL DEFAULT 1').catch(() => {});
+    await state.pool.query('CREATE INDEX idx_product_services_type ON product_services(type_id);').catch(() => {});
+    await state.pool.query('CREATE UNIQUE INDEX idx_product_services_name ON product_services(name);').catch(() => {});
+    await state.pool.query('CREATE UNIQUE INDEX idx_product_services_wbs_code ON product_services(wbs_code);').catch(() => {});
+
     state.dbReady = true;
     state.dbReadyMessage = '';
     return true;
@@ -741,6 +774,202 @@ async function main() {
         if (!userId) return writeJson(req, res, 400, { success: false, code: 'USER_ID_REQUIRED', message: '缺少用户ID' });
 
         await state.pool.query('UPDATE users SET is_enabled = ? WHERE id = ?', [isEnabled ? 1 : 0, userId]);
+        return writeJson(req, res, 200, { success: true });
+      }
+
+      if (req.method === 'GET' && pathname === '/api/admin/product-service-types') {
+        const auth = await resolveAdminFromRequest(req);
+        if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });
+
+        const [rows] = await state.pool.query('SELECT id, name, wbs_code, created_at FROM product_service_types ORDER BY created_at DESC');
+        const types = Array.isArray(rows) ? rows.map((r) => ({ typeId: r.id, name: r.name, wbsCode: r.wbs_code || '', createdAt: r.created_at })) : [];
+        return writeJson(req, res, 200, { success: true, types });
+      }
+
+      if (req.method === 'POST' && pathname === '/api/admin/product-service-types/create') {
+        const auth = await resolveAdminFromRequest(req);
+        if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });
+
+        const body = await readJson(req);
+        const name = typeof body?.name === 'string' ? body.name.trim() : '';
+        const wbsCode = typeof body?.wbsCode === 'string' ? body.wbsCode.trim() : '';
+        if (!name) return writeJson(req, res, 400, { success: false, code: 'NAME_REQUIRED', message: '名称不能为空' });
+        if (name.length > 64) return writeJson(req, res, 400, { success: false, code: 'NAME_TOO_LONG', message: '名称过长' });
+        if (wbsCode.length > 64) return writeJson(req, res, 400, { success: false, code: 'WBS_CODE_TOO_LONG', message: 'WBS代码过长' });
+
+        const [rows] = await state.pool.query('SELECT id FROM product_service_types WHERE name = ? LIMIT 1', [name]);
+        const existed = Array.isArray(rows) && rows.length ? rows[0] : null;
+        if (existed?.id) return writeJson(req, res, 409, { success: false, code: 'NAME_EXISTS', message: '该类型名称已存在' });
+
+        const id = uuidv4();
+        const createdAt = new Date().toISOString();
+        await state.pool.query('INSERT INTO product_service_types (id, name, wbs_code, created_at) VALUES (?,?,?,?)', [id, name, wbsCode || null, createdAt]);
+        return writeJson(req, res, 200, { success: true, type: { typeId: id, name, wbsCode, createdAt } });
+      }
+
+      if (req.method === 'POST' && pathname === '/api/admin/product-service-types/update') {
+        const auth = await resolveAdminFromRequest(req);
+        if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });
+
+        const body = await readJson(req);
+        const typeId = typeof body?.typeId === 'string' ? body.typeId : '';
+        const name = typeof body?.name === 'string' ? body.name.trim() : '';
+        const wbsCode = typeof body?.wbsCode === 'string' ? body.wbsCode.trim() : '';
+        if (!typeId) return writeJson(req, res, 400, { success: false, code: 'TYPE_ID_REQUIRED', message: '缺少类型ID' });
+        if (!name) return writeJson(req, res, 400, { success: false, code: 'NAME_REQUIRED', message: '名称不能为空' });
+        if (name.length > 64) return writeJson(req, res, 400, { success: false, code: 'NAME_TOO_LONG', message: '名称过长' });
+        if (wbsCode.length > 64) return writeJson(req, res, 400, { success: false, code: 'WBS_CODE_TOO_LONG', message: 'WBS代码过长' });
+
+        const [found] = await state.pool.query('SELECT id FROM product_service_types WHERE id = ? LIMIT 1', [typeId]);
+        const existed = Array.isArray(found) && found.length ? found[0] : null;
+        if (!existed?.id) return writeJson(req, res, 404, { success: false, code: 'NOT_FOUND', message: '类型不存在' });
+
+        const [sameName] = await state.pool.query('SELECT id FROM product_service_types WHERE name = ? AND id <> ? LIMIT 1', [name, typeId]);
+        const conflict = Array.isArray(sameName) && sameName.length ? sameName[0] : null;
+        if (conflict?.id) return writeJson(req, res, 409, { success: false, code: 'NAME_EXISTS', message: '该类型名称已存在' });
+
+        await state.pool.query('UPDATE product_service_types SET name = ?, wbs_code = ? WHERE id = ?', [name, wbsCode || null, typeId]);
+        return writeJson(req, res, 200, { success: true });
+      }
+
+      if (req.method === 'POST' && pathname === '/api/admin/product-service-types/delete') {
+        const auth = await resolveAdminFromRequest(req);
+        if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });
+
+        const body = await readJson(req);
+        const typeId = typeof body?.typeId === 'string' ? body.typeId : '';
+        if (!typeId) return writeJson(req, res, 400, { success: false, code: 'TYPE_ID_REQUIRED', message: '缺少类型ID' });
+
+        const usedRows = await state.pool.query('SELECT COUNT(*) AS total FROM product_services WHERE type_id = ?', [typeId]);
+        const usedTotal = Array.isArray(usedRows?.[0]) && usedRows[0].length ? Number(usedRows[0][0]?.total || 0) : 0;
+        if (usedTotal > 0) {
+          return writeJson(req, res, 400, { success: false, code: 'TYPE_IN_USE', message: '该产品服务类型下存在关联的产品服务，无法删除' });
+        }
+
+        await state.pool.query('DELETE FROM product_service_types WHERE id = ?', [typeId]);
+        return writeJson(req, res, 200, { success: true });
+      }
+
+      if (req.method === 'GET' && pathname === '/api/admin/product-services') {
+        const auth = await resolveAdminFromRequest(req);
+        if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });
+
+        const [rows] = await state.pool.query(
+          'SELECT id, type_id, name, wbs_code, description, reference_weeks, owner_text, is_enabled, created_at FROM product_services ORDER BY created_at DESC',
+        );
+        const services = Array.isArray(rows)
+          ? rows.map((r) => ({
+            serviceId: r.id,
+            typeId: r.type_id || '',
+            name: r.name,
+            wbsCode: r.wbs_code,
+            description: r.description || '',
+            referenceWeeks: typeof r.reference_weeks === 'number' ? r.reference_weeks : Number(r.reference_weeks || 0),
+            ownerText: r.owner_text || '',
+            isEnabled: r.is_enabled !== 0,
+            createdAt: r.created_at,
+          }))
+          : [];
+        return writeJson(req, res, 200, { success: true, services });
+      }
+
+      if (req.method === 'POST' && pathname === '/api/admin/product-services/create') {
+        const auth = await resolveAdminFromRequest(req);
+        if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });
+
+        const body = await readJson(req);
+        const name = typeof body?.name === 'string' ? body.name.trim() : '';
+        const wbsCode = typeof body?.wbsCode === 'string' ? body.wbsCode.trim() : '';
+        const description = typeof body?.description === 'string' ? body.description.trim() : '';
+        const ownerText = typeof body?.ownerText === 'string' ? body.ownerText.trim() : '';
+        const typeId = typeof body?.typeId === 'string' ? body.typeId : '';
+        const referenceWeeksRaw = body?.referenceWeeks;
+        const referenceWeeks = Number.isFinite(referenceWeeksRaw)
+          ? Number(referenceWeeksRaw)
+          : (typeof referenceWeeksRaw === 'string' ? Number.parseInt(referenceWeeksRaw, 10) : 0);
+        const isEnabled = body?.isEnabled === undefined ? true : Boolean(body?.isEnabled);
+
+        if (!name) return writeJson(req, res, 400, { success: false, code: 'NAME_REQUIRED', message: '产品服务名称不能为空' });
+        if (name.length > 128) return writeJson(req, res, 400, { success: false, code: 'NAME_TOO_LONG', message: '产品服务名称过长' });
+        if (!wbsCode) return writeJson(req, res, 400, { success: false, code: 'WBS_REQUIRED', message: 'WBS编码不能为空' });
+        if (wbsCode.length > 64) return writeJson(req, res, 400, { success: false, code: 'WBS_TOO_LONG', message: 'WBS编码过长' });
+        if (!Number.isFinite(referenceWeeks) || referenceWeeks < 0) return writeJson(req, res, 400, { success: false, code: 'REFERENCE_WEEKS_INVALID', message: '参考时间（周）不合法' });
+        if (ownerText.length > 128) return writeJson(req, res, 400, { success: false, code: 'OWNER_TOO_LONG', message: '责任方过长' });
+
+        const [sameNameRows] = await state.pool.query('SELECT id FROM product_services WHERE name = ? LIMIT 1', [name]);
+        const sameName = Array.isArray(sameNameRows) && sameNameRows.length ? sameNameRows[0] : null;
+        if (sameName?.id) return writeJson(req, res, 409, { success: false, code: 'NAME_EXISTS', message: '产品服务名称已存在' });
+
+        const [sameWbsRows] = await state.pool.query('SELECT id FROM product_services WHERE wbs_code = ? LIMIT 1', [wbsCode]);
+        const sameWbs = Array.isArray(sameWbsRows) && sameWbsRows.length ? sameWbsRows[0] : null;
+        if (sameWbs?.id) return writeJson(req, res, 409, { success: false, code: 'WBS_EXISTS', message: 'WBS编码已存在' });
+
+        const id = uuidv4();
+        const createdAt = new Date().toISOString();
+        await state.pool.query(
+          'INSERT INTO product_services (id, type_id, name, wbs_code, description, reference_weeks, owner_text, is_enabled, created_at) VALUES (?,?,?,?,?,?,?,?,?)',
+          [id, typeId || null, name, wbsCode, description || null, referenceWeeks || 0, ownerText || null, isEnabled ? 1 : 0, createdAt],
+        );
+
+        return writeJson(req, res, 200, {
+          success: true,
+          service: { serviceId: id, typeId, name, wbsCode, description, referenceWeeks: referenceWeeks || 0, ownerText, isEnabled, createdAt },
+        });
+      }
+
+      if (req.method === 'POST' && pathname === '/api/admin/product-services/update') {
+        const auth = await resolveAdminFromRequest(req);
+        if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });
+
+        const body = await readJson(req);
+        const serviceId = typeof body?.serviceId === 'string' ? body.serviceId : '';
+        const name = typeof body?.name === 'string' ? body.name.trim() : '';
+        const wbsCode = typeof body?.wbsCode === 'string' ? body.wbsCode.trim() : '';
+        const description = typeof body?.description === 'string' ? body.description.trim() : '';
+        const ownerText = typeof body?.ownerText === 'string' ? body.ownerText.trim() : '';
+        const typeId = typeof body?.typeId === 'string' ? body.typeId : '';
+        const referenceWeeksRaw = body?.referenceWeeks;
+        const referenceWeeks = Number.isFinite(referenceWeeksRaw)
+          ? Number(referenceWeeksRaw)
+          : (typeof referenceWeeksRaw === 'string' ? Number.parseInt(referenceWeeksRaw, 10) : 0);
+        const isEnabled = body?.isEnabled === undefined ? true : Boolean(body?.isEnabled);
+
+        if (!serviceId) return writeJson(req, res, 400, { success: false, code: 'SERVICE_ID_REQUIRED', message: '缺少产品服务ID' });
+        if (!name) return writeJson(req, res, 400, { success: false, code: 'NAME_REQUIRED', message: '产品服务名称不能为空' });
+        if (name.length > 128) return writeJson(req, res, 400, { success: false, code: 'NAME_TOO_LONG', message: '产品服务名称过长' });
+        if (!wbsCode) return writeJson(req, res, 400, { success: false, code: 'WBS_REQUIRED', message: 'WBS编码不能为空' });
+        if (wbsCode.length > 64) return writeJson(req, res, 400, { success: false, code: 'WBS_TOO_LONG', message: 'WBS编码过长' });
+        if (!Number.isFinite(referenceWeeks) || referenceWeeks < 0) return writeJson(req, res, 400, { success: false, code: 'REFERENCE_WEEKS_INVALID', message: '参考时间（周）不合法' });
+        if (ownerText.length > 128) return writeJson(req, res, 400, { success: false, code: 'OWNER_TOO_LONG', message: '责任方过长' });
+
+        const [foundRows] = await state.pool.query('SELECT id FROM product_services WHERE id = ? LIMIT 1', [serviceId]);
+        const found = Array.isArray(foundRows) && foundRows.length ? foundRows[0] : null;
+        if (!found?.id) return writeJson(req, res, 404, { success: false, code: 'NOT_FOUND', message: '产品服务不存在' });
+
+        const [sameNameRows] = await state.pool.query('SELECT id FROM product_services WHERE name = ? AND id <> ? LIMIT 1', [name, serviceId]);
+        const sameName = Array.isArray(sameNameRows) && sameNameRows.length ? sameNameRows[0] : null;
+        if (sameName?.id) return writeJson(req, res, 409, { success: false, code: 'NAME_EXISTS', message: '产品服务名称已存在' });
+
+        const [sameWbsRows] = await state.pool.query('SELECT id FROM product_services WHERE wbs_code = ? AND id <> ? LIMIT 1', [wbsCode, serviceId]);
+        const sameWbs = Array.isArray(sameWbsRows) && sameWbsRows.length ? sameWbsRows[0] : null;
+        if (sameWbs?.id) return writeJson(req, res, 409, { success: false, code: 'WBS_EXISTS', message: 'WBS编码已存在' });
+
+        await state.pool.query(
+          'UPDATE product_services SET type_id = ?, name = ?, wbs_code = ?, description = ?, reference_weeks = ?, owner_text = ?, is_enabled = ? WHERE id = ?',
+          [typeId || null, name, wbsCode, description || null, referenceWeeks || 0, ownerText || null, isEnabled ? 1 : 0, serviceId],
+        );
+        return writeJson(req, res, 200, { success: true });
+      }
+
+      if (req.method === 'POST' && pathname === '/api/admin/product-services/delete') {
+        const auth = await resolveAdminFromRequest(req);
+        if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });
+
+        const body = await readJson(req);
+        const serviceId = typeof body?.serviceId === 'string' ? body.serviceId : '';
+        if (!serviceId) return writeJson(req, res, 400, { success: false, code: 'SERVICE_ID_REQUIRED', message: '缺少产品服务ID' });
+
+        await state.pool.query('DELETE FROM product_services WHERE id = ?', [serviceId]);
         return writeJson(req, res, 200, { success: true });
       }
 

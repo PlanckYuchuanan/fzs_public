@@ -14,6 +14,9 @@
 - 登录后：
   - 全屏左右布局（不再使用登录卡片容器）
   - 左侧菜单（管理后台偏暖色科技风，与产品端有细微色彩差异）
+    - 客户管理（待定义）
+    - 产品和服务管理（待定义）
+      - 子菜单 TAB：产品服务 / 产品服务类型（内容待定义）
     - 用户管理
     - 管理员
   - 右侧主内容
@@ -35,6 +38,16 @@
   - `POST /api/admin/admin-users/status`
   - `POST /api/admin/admin-users/permission`
   - 用户分页：`GET /api/admin/users?page=1&pageSize=20` → `users/page/pageSize/total`
+  - 产品服务类型管理：
+    - `GET /api/admin/product-service-types`
+    - `POST /api/admin/product-service-types/create`
+    - `POST /api/admin/product-service-types/update`
+    - `POST /api/admin/product-service-types/delete`（删除前校验：该类型下无关联产品服务）
+  - 产品服务管理：
+    - `GET /api/admin/product-services`
+    - `POST /api/admin/product-services/create`（名称不可重复，WBS编码不可重复）
+    - `POST /api/admin/product-services/update`（名称不可重复，WBS编码不可重复）
+    - `POST /api/admin/product-services/delete`
 - 登录错误提示映射：
   - `INVALID_CREDENTIALS`：手机号或密码错误
   - `DB_UNAVAILABLE`：服务暂不可用，请稍后重试
@@ -56,6 +69,21 @@
 
 - 用户表：`users`
   - 新增：`is_enabled`（是否启用，停用后不可登录）
+
+- 产品服务类型表：`product_service_types`
+  - `id`：类型ID
+  - `name`：名称
+  - `wbs_code`：WBS代码（可重复）
+
+- 产品服务表：`product_services`
+  - `id`：产品服务ID
+  - `type_id`：产品服务类型ID（可空，用于与 `product_service_types` 关联）
+  - `name`：产品服务名称（不可重复）
+  - `wbs_code`：WBS编码（不可重复）
+  - `description`：描述
+  - `reference_weeks`：参考时间（周）
+  - `owner_text`：责任方（文本描述）
+  - `is_enabled`：启用/停用状态
 
 ## 运维脚本
 
