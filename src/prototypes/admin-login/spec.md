@@ -48,6 +48,7 @@
     - `POST /api/admin/product-services/create`（名称不可重复，WBS编码不可重复）
     - `POST /api/admin/product-services/update`（名称不可重复，WBS编码不可重复）
     - `POST /api/admin/product-services/delete`
+    - `POST /api/admin/product-services/reorder`（body：`{ serviceId, direction: 'up' | 'down' }`）
 - 登录错误提示映射：
   - `INVALID_CREDENTIALS`：手机号或密码错误
   - `DB_UNAVAILABLE`：服务暂不可用，请稍后重试
@@ -84,6 +85,7 @@
   - `reference_weeks`：参考时间（周）
   - `owner_text`：责任方（文本描述）
   - `is_enabled`：启用/停用状态
+  - `sort_order`：排序值（越小越靠前）
 
 ## 运维脚本
 

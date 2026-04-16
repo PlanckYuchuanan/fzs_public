@@ -47,6 +47,7 @@ type ProductServiceRow = {
   referenceWeeks: number;
   ownerText: string;
   isEnabled: boolean;
+  sortOrder: number;
   createdAt: string;
 };
 
@@ -496,6 +497,20 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function AdminLogin(
       setPanelBusy(false);
     }
   }, [fetchJson, loadProductServices]);
+
+  const reorderService = useCallback(async function (row: ProductServiceRow, direction: 'up' | 'down') {
+    setPanelBusy(true);
+    setError('');
+    try {
+      const { res, json } = await fetchJson('/api/admin/product-services/reorder', { method: 'POST', body: JSON.stringify({ serviceId: row.serviceId, direction }) });
+      if (!res.ok || !json?.success) throw new Error(mapAdminApiError(res, json, '排序失败'));
+      await loadProductServices();
+    } catch (e: any) {
+      setError(e?.message || '排序失败');
+    } finally {
+      setPanelBusy(false);
+    }
+  }, [fetchJson, loadProductServices]);
   const submitTypeModal = useCallback(async function () {
     const name = typeName.trim();
     const wbsCode = typeWbsCode.trim();
@@ -720,7 +735,7 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function AdminLogin(
                         <div className="fzs-admin-row header">
                           <div>ID</div><div>产品服务名称</div><div>WBS编码</div><div>类型</div><div>参考时间（周）</div><div>状态</div><div>操作</div>
                         </div>
-                        {productServices.map((s) => (
+                        {productServices.map((s, idx) => (
                           <div key={s.serviceId} className="fzs-admin-row">
                             <div>{s.serviceId}</div>
                             <div>{s.name}</div>
@@ -729,6 +744,12 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function AdminLogin(
                             <div>{s.referenceWeeks}</div>
                             <div>{s.isEnabled ? '启用' : '停用'}</div>
                             <div className="fzs-admin-actions">
+                              <button className="fzs-admin-mini" type="button" onClick={() => void reorderService(s, 'up')} disabled={panelBusy || idx === 0}>
+                                上移
+                              </button>
+                              <button className="fzs-admin-mini" type="button" onClick={() => void reorderService(s, 'down')} disabled={panelBusy || idx === productServices.length - 1}>
+                                下移
+                              </button>
                               <button className="fzs-admin-mini" type="button" onClick={() => void openEditService(s)} disabled={panelBusy}>
                                 编辑
                               </button>

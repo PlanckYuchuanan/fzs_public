@@ -361,6 +361,7 @@ async function ensureDbReady() {
         reference_weeks INT NOT NULL DEFAULT 0,
         owner_text VARCHAR(128) NULL,
         is_enabled TINYINT(1) NOT NULL DEFAULT 1,
+        sort_order INT NOT NULL DEFAULT 0,
         created_at VARCHAR(32) NOT NULL
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
@@ -369,7 +370,9 @@ async function ensureDbReady() {
     await ensureColumn('product_services', 'reference_weeks', 'ALTER TABLE product_services ADD COLUMN reference_weeks INT NOT NULL DEFAULT 0').catch(() => {});
     await ensureColumn('product_services', 'owner_text', 'ALTER TABLE product_services ADD COLUMN owner_text VARCHAR(128) NULL').catch(() => {});
     await ensureColumn('product_services', 'is_enabled', 'ALTER TABLE product_services ADD COLUMN is_enabled TINYINT(1) NOT NULL DEFAULT 1').catch(() => {});
+    await ensureColumn('product_services', 'sort_order', 'ALTER TABLE product_services ADD COLUMN sort_order INT NOT NULL DEFAULT 0').catch(() => {});
     await state.pool.query('CREATE INDEX idx_product_services_type ON product_services(type_id);').catch(() => {});
+    await state.pool.query('CREATE INDEX idx_product_services_sort_order ON product_services(sort_order);').catch(() => {});
     await state.pool.query('CREATE UNIQUE INDEX idx_product_services_name ON product_services(name);').catch(() => {});
     await state.pool.query('CREATE UNIQUE INDEX idx_product_services_wbs_code ON product_services(wbs_code);').catch(() => {});
 
@@ -855,7 +858,7 @@ async function main() {
         if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });
 
         const [rows] = await state.pool.query(
-          'SELECT id, type_id, name, wbs_code, description, reference_weeks, owner_text, is_enabled, created_at FROM product_services ORDER BY created_at DESC',
+          'SELECT id, type_id, name, wbs_code, description, reference_weeks, owner_text, is_enabled, sort_order, created_at FROM product_services ORDER BY sort_order ASC, created_at DESC',
         );
         const services = Array.isArray(rows)
           ? rows.map((r) => ({
@@ -867,6 +870,7 @@ async function main() {
             referenceWeeks: typeof r.reference_weeks === 'number' ? r.reference_weeks : Number(r.reference_weeks || 0),
             ownerText: r.owner_text || '',
             isEnabled: r.is_enabled !== 0,
+            sortOrder: typeof r.sort_order === 'number' ? r.sort_order : Number(r.sort_order || 0),
             createdAt: r.created_at,
           }))
           : [];
@@ -904,16 +908,19 @@ async function main() {
         const sameWbs = Array.isArray(sameWbsRows) && sameWbsRows.length ? sameWbsRows[0] : null;
         if (sameWbs?.id) return writeJson(req, res, 409, { success: false, code: 'WBS_EXISTS', message: 'WBS编码已存在' });
 
+        const sortRows = await state.pool.query('SELECT COALESCE(MAX(sort_order), 0) AS max_order FROM product_services');
+        const sortOrder = Array.isArray(sortRows?.[0]) && sortRows[0].length ? Number(sortRows[0][0]?.max_order || 0) + 1 : 1;
+
         const id = uuidv4();
         const createdAt = new Date().toISOString();
         await state.pool.query(
-          'INSERT INTO product_services (id, type_id, name, wbs_code, description, reference_weeks, owner_text, is_enabled, created_at) VALUES (?,?,?,?,?,?,?,?,?)',
-          [id, typeId || null, name, wbsCode, description || null, referenceWeeks || 0, ownerText || null, isEnabled ? 1 : 0, createdAt],
+          'INSERT INTO product_services (id, type_id, name, wbs_code, description, reference_weeks, owner_text, is_enabled, sort_order, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
+          [id, typeId || null, name, wbsCode, description || null, referenceWeeks || 0, ownerText || null, isEnabled ? 1 : 0, sortOrder, createdAt],
         );
 
         return writeJson(req, res, 200, {
           success: true,
-          service: { serviceId: id, typeId, name, wbsCode, description, referenceWeeks: referenceWeeks || 0, ownerText, isEnabled, createdAt },
+          service: { serviceId: id, typeId, name, wbsCode, description, referenceWeeks: referenceWeeks || 0, ownerText, isEnabled, sortOrder, createdAt },
         });
       }
 
@@ -973,6 +980,74 @@ async function main() {
         return writeJson(req, res, 200, { success: true });
       }
 
+      if (req.method === 'POST' && pathname === '/api/admin/product-services/reorder') {
+        const auth = await resolveAdminFromRequest(req);
+        if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });
+
+        const body = await readJson(req);
+        const serviceId = typeof body?.serviceId === 'string' ? body.serviceId : '';
+        const direction = typeof body?.direction === 'string' ? body.direction : '';
+        if (!serviceId) return writeJson(req, res, 400, { success: false, code: 'SERVICE_ID_REQUIRED', message: '缺少产品服务ID' });
+        if (direction !== 'up' && direction !== 'down') {
+          return writeJson(req, res, 400, { success: false, code: 'DIRECTION_INVALID', message: 'direction 仅支持 up/down' });
+        }
+
+        const distinctRows = await state.pool.query('SELECT COUNT(DISTINCT sort_order) AS c FROM product_services');
+        const distinctCount = Array.isArray(distinctRows?.[0]) && distinctRows[0].length ? Number(distinctRows[0][0]?.c || 0) : 0;
+        if (distinctCount <= 1) {
+          const [initRows] = await state.pool.query('SELECT id FROM product_services ORDER BY created_at DESC');
+          if (Array.isArray(initRows)) {
+            for (let i = 0; i < initRows.length; i += 1) {
+              const row = initRows[i];
+              const nextOrder = (i + 1) * 10;
+              await state.pool.query('UPDATE product_services SET sort_order = ? WHERE id = ?', [nextOrder, row.id]);
+            }
+          }
+        }
+
+        const [rows] = await state.pool.query('SELECT id, sort_order FROM product_services ORDER BY sort_order ASC, created_at DESC');
+        if (!Array.isArray(rows)) return writeJson(req, res, 200, { success: true });
+        const idx = rows.findIndex((r) => r.id === serviceId);
+        if (idx < 0) return writeJson(req, res, 404, { success: false, code: 'NOT_FOUND', message: '产品服务不存在' });
+
+        const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+        if (targetIdx < 0 || targetIdx >= rows.length) return writeJson(req, res, 200, { success: true });
+
+        const a = rows[idx];
+        const b = rows[targetIdx];
+        const aOrder = typeof a.sort_order === 'number' ? a.sort_order : Number(a.sort_order || 0);
+        const bOrder = typeof b.sort_order === 'number' ? b.sort_order : Number(b.sort_order || 0);
+
+        if (aOrder === bOrder) {
+          const [initRows] = await state.pool.query('SELECT id FROM product_services ORDER BY sort_order ASC, created_at DESC');
+          if (Array.isArray(initRows)) {
+            for (let i = 0; i < initRows.length; i += 1) {
+              const row = initRows[i];
+              const nextOrder = (i + 1) * 10;
+              await state.pool.query('UPDATE product_services SET sort_order = ? WHERE id = ?', [nextOrder, row.id]);
+            }
+          }
+          const [rows2] = await state.pool.query('SELECT id, sort_order FROM product_services ORDER BY sort_order ASC, created_at DESC');
+          if (!Array.isArray(rows2)) return writeJson(req, res, 200, { success: true });
+          const idx2 = rows2.findIndex((r) => r.id === serviceId);
+          if (idx2 < 0) return writeJson(req, res, 404, { success: false, code: 'NOT_FOUND', message: '产品服务不存在' });
+          const targetIdx2 = direction === 'up' ? idx2 - 1 : idx2 + 1;
+          if (targetIdx2 < 0 || targetIdx2 >= rows2.length) return writeJson(req, res, 200, { success: true });
+          const a2 = rows2[idx2];
+          const b2 = rows2[targetIdx2];
+          const aOrder2 = typeof a2.sort_order === 'number' ? a2.sort_order : Number(a2.sort_order || 0);
+          const bOrder2 = typeof b2.sort_order === 'number' ? b2.sort_order : Number(b2.sort_order || 0);
+          await state.pool.query('UPDATE product_services SET sort_order = ? WHERE id = ?', [bOrder2, a2.id]);
+          await state.pool.query('UPDATE product_services SET sort_order = ? WHERE id = ?', [aOrder2, b2.id]);
+          return writeJson(req, res, 200, { success: true });
+        }
+
+        await state.pool.query('UPDATE product_services SET sort_order = ? WHERE id = ?', [bOrder, a.id]);
+        await state.pool.query('UPDATE product_services SET sort_order = ? WHERE id = ?', [aOrder, b.id]);
+
+        return writeJson(req, res, 200, { success: true });
+      }
+
       if (req.method === 'GET' && pathname === '/api/product-services') {
         const cookies = parseCookies(req);
         const token = typeof cookies[ACCESS_COOKIE_NAME] === 'string' ? cookies[ACCESS_COOKIE_NAME] : '';
@@ -994,7 +1069,7 @@ async function main() {
           FROM product_services ps
           LEFT JOIN product_service_types pst ON pst.id = ps.type_id
           WHERE ps.is_enabled = 1
-          ORDER BY ps.created_at DESC
+          ORDER BY ps.sort_order ASC, ps.created_at DESC
         `);
         const services = Array.isArray(rows)
           ? rows.map((r) => ({
