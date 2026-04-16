@@ -347,6 +347,20 @@
   font-size: 12px;
   color: rgba(203, 213, 225, 0.78);
 }
+.fzs-admin-entry {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  color: rgba(203, 213, 225, 0.72);
+  padding: 6px 8px;
+  border-radius: 10px;
+}
+.fzs-admin-entry:hover {
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(148, 163, 184, 0.10);
+}
 
 .fzs-topbar {
   height: 56px;

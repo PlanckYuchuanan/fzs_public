@@ -18,6 +18,9 @@ const COOKIE_SECURE = String(process.env.COOKIE_SECURE || '').toLowerCase() === 
 const ACCESS_COOKIE_NAME = 'ax_access';
 const REFRESH_COOKIE_NAME = 'ax_refresh';
 const DEVICE_COOKIE_NAME = 'ax_device';
+const ADMIN_ACCESS_COOKIE_NAME = 'ax_admin_access';
+const ADMIN_REFRESH_COOKIE_NAME = 'ax_admin_refresh';
+const ADMIN_DEVICE_COOKIE_NAME = 'ax_admin_device';
 
 function getCorsHeaders(req) {
   const origin = typeof req?.headers?.origin === 'string' ? req.headers.origin : '';
@@ -171,17 +174,17 @@ function getCookieSecure(req) {
   return /^https$/i.test(proto);
 }
 
-function getOrCreateDeviceId(req, res) {
+function getOrCreateDeviceIdFor(req, res, cookieName) {
   const cookies = parseCookies(req);
-  const existing = typeof cookies[DEVICE_COOKIE_NAME] === 'string' ? cookies[DEVICE_COOKIE_NAME] : '';
+  const existing = typeof cookies[cookieName] === 'string' ? cookies[cookieName] : '';
   if (existing) return existing;
   const next = uuidv4();
-  setCookie(res, DEVICE_COOKIE_NAME, next, { path: '/', httpOnly: false, secure: getCookieSecure(req), sameSite: 'Lax', maxAgeSeconds: REFRESH_TOKEN_TTL_SEC });
+  setCookie(res, cookieName, next, { path: '/', httpOnly: false, secure: getCookieSecure(req), sameSite: 'Lax', maxAgeSeconds: REFRESH_TOKEN_TTL_SEC });
   return next;
 }
 
 async function issueTokensForUser(req, res, userRow) {
-  const deviceId = getOrCreateDeviceId(req, res);
+  const deviceId = getOrCreateDeviceIdFor(req, res, DEVICE_COOKIE_NAME);
   const scope = 'user';
   const accessToken = await signAccessToken({ user_id: userRow.id, username: userRow.phone, scope });
 
@@ -201,6 +204,39 @@ async function issueTokensForUser(req, res, userRow) {
   const secure = getCookieSecure(req);
   setCookie(res, ACCESS_COOKIE_NAME, accessToken, { path: '/', httpOnly: true, secure, sameSite: 'Lax', maxAgeSeconds: ACCESS_TOKEN_TTL_SEC });
   setCookie(res, REFRESH_COOKIE_NAME, refreshToken, { path: '/', httpOnly: true, secure, sameSite: 'Lax', maxAgeSeconds: REFRESH_TOKEN_TTL_SEC });
+}
+
+function getAdminPublic(adminRow) {
+  return {
+    adminId: adminRow.id,
+    phone: adminRow.phone,
+    createdAt: adminRow.created_at,
+    lastLoginAt: adminRow.last_login_at ?? null,
+    isSuperadmin: Boolean(adminRow.is_superadmin),
+  };
+}
+
+async function issueTokensForAdmin(req, res, adminRow) {
+  const deviceId = getOrCreateDeviceIdFor(req, res, ADMIN_DEVICE_COOKIE_NAME);
+  const scope = 'admin';
+  const accessToken = await signAccessToken({ user_id: adminRow.id, username: adminRow.phone, scope });
+
+  const refreshToken = crypto.randomBytes(32).toString('base64url');
+  const refreshTokenHash = sha256Hex(refreshToken);
+  const nowIso = new Date().toISOString();
+  const expiresIso = new Date(Date.now() + REFRESH_TOKEN_TTL_SEC * 1000).toISOString();
+  const refreshId = uuidv4();
+  const ip = typeof req?.socket?.remoteAddress === 'string' ? req.socket.remoteAddress : null;
+  const userAgent = typeof req?.headers?.['user-agent'] === 'string' ? req.headers['user-agent'].slice(0, 255) : null;
+
+  await state.pool.query(
+    'INSERT INTO admin_refresh_tokens (id, admin_id, token_hash, device_id, created_at, expires_at, revoked_at, replaced_by, ip, user_agent) VALUES (?,?,?,?,?,?,?,?,?,?)',
+    [refreshId, adminRow.id, refreshTokenHash, deviceId, nowIso, expiresIso, null, null, ip, userAgent],
+  );
+
+  const secure = getCookieSecure(req);
+  setCookie(res, ADMIN_ACCESS_COOKIE_NAME, accessToken, { path: '/', httpOnly: true, secure, sameSite: 'Lax', maxAgeSeconds: ACCESS_TOKEN_TTL_SEC });
+  setCookie(res, ADMIN_REFRESH_COOKIE_NAME, refreshToken, { path: '/', httpOnly: true, secure, sameSite: 'Lax', maxAgeSeconds: REFRESH_TOKEN_TTL_SEC });
 }
 
 const state = {
@@ -254,6 +290,36 @@ async function ensureDbReady() {
     `);
     await state.pool.query('CREATE INDEX idx_refresh_tokens_user ON refresh_tokens(user_id);').catch(() => {});
     await state.pool.query('CREATE INDEX idx_refresh_tokens_device ON refresh_tokens(device_id);').catch(() => {});
+
+    await state.pool.query(`
+      CREATE TABLE IF NOT EXISTS admin_user (
+        id VARCHAR(36) PRIMARY KEY,
+        phone VARCHAR(20) NOT NULL UNIQUE,
+        password_salt VARCHAR(64) NOT NULL,
+        password_hash VARCHAR(128) NOT NULL,
+        created_at VARCHAR(32) NOT NULL,
+        last_login_at VARCHAR(32) NULL,
+        is_superadmin TINYINT(1) NOT NULL DEFAULT 0
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+    await state.pool.query('CREATE INDEX idx_admin_user_phone ON admin_user(phone);').catch(() => {});
+
+    await state.pool.query(`
+      CREATE TABLE IF NOT EXISTS admin_refresh_tokens (
+        id VARCHAR(36) PRIMARY KEY,
+        admin_id VARCHAR(36) NOT NULL,
+        token_hash CHAR(64) NOT NULL UNIQUE,
+        device_id VARCHAR(64) NOT NULL,
+        created_at VARCHAR(32) NOT NULL,
+        expires_at VARCHAR(32) NOT NULL,
+        revoked_at VARCHAR(32) NULL,
+        replaced_by VARCHAR(36) NULL,
+        ip VARCHAR(64) NULL,
+        user_agent VARCHAR(255) NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+    await state.pool.query('CREATE INDEX idx_admin_refresh_tokens_admin ON admin_refresh_tokens(admin_id);').catch(() => {});
+    await state.pool.query('CREATE INDEX idx_admin_refresh_tokens_device ON admin_refresh_tokens(device_id);').catch(() => {});
 
     state.dbReady = true;
     state.dbReadyMessage = '';
@@ -351,6 +417,40 @@ async function main() {
         return writeJson(req, res, 200, { success: true, user: getUserPublic(user) });
       }
 
+      if (req.method === 'POST' && pathname === '/api/admin/auth/login') {
+        const ok = await ensureDbReady();
+        if (!ok) return writeJson(req, res, 503, { success: false, code: 'DB_UNAVAILABLE', message: '数据库不可用' });
+
+        const body = await readJson(req);
+        const phone = normalizePhone(body.phone);
+        const password = body.password;
+
+        if (!phone) return writeJson(req, res, 400, { success: false, code: 'PHONE_REQUIRED', message: '手机号不能为空' });
+        if (!validateChinaMainlandMobile(phone)) {
+          return writeJson(req, res, 400, { success: false, code: 'PHONE_INVALID', message: '手机号格式不正确（中国大陆 11 位）' });
+        }
+        if (typeof password !== 'string') return writeJson(req, res, 400, { success: false, code: 'PASSWORD_REQUIRED', message: '密码不能为空' });
+
+        const [rows] = await state.pool.query(
+          'SELECT id, phone, password_salt, password_hash, created_at, last_login_at, is_superadmin FROM admin_user WHERE phone = ? LIMIT 1',
+          [phone],
+        );
+        const admin = Array.isArray(rows) && rows.length ? rows[0] : null;
+        if (!admin) return writeJson(req, res, 401, { success: false, code: 'INVALID_CREDENTIALS', message: '手机号或密码错误' });
+
+        const computed = pbkdf2Hash(password, admin.password_salt);
+        if (computed !== admin.password_hash) {
+          return writeJson(req, res, 401, { success: false, code: 'INVALID_CREDENTIALS', message: '手机号或密码错误' });
+        }
+
+        const nowIso = new Date().toISOString();
+        await state.pool.query('UPDATE admin_user SET last_login_at = ? WHERE id = ?', [nowIso, admin.id]);
+        const mergedAdmin = { ...admin, last_login_at: nowIso };
+
+        await issueTokensForAdmin(req, res, mergedAdmin);
+        return writeJson(req, res, 200, { success: true, admin: getAdminPublic(mergedAdmin) });
+      }
+
       if (req.method === 'POST' && pathname === '/api/auth/refresh') {
         const ok = await ensureDbReady();
         if (!ok) return writeJson(req, res, 503, { success: false, code: 'DB_UNAVAILABLE', message: '数据库不可用' });
@@ -403,6 +503,61 @@ async function main() {
         return writeJson(req, res, 200, { success: true });
       }
 
+      if (req.method === 'POST' && pathname === '/api/admin/auth/refresh') {
+        const ok = await ensureDbReady();
+        if (!ok) return writeJson(req, res, 503, { success: false, code: 'DB_UNAVAILABLE', message: '数据库不可用' });
+
+        const cookies = parseCookies(req);
+        const rawRefresh = typeof cookies[ADMIN_REFRESH_COOKIE_NAME] === 'string' ? cookies[ADMIN_REFRESH_COOKIE_NAME] : '';
+        const deviceId = typeof cookies[ADMIN_DEVICE_COOKIE_NAME] === 'string' ? cookies[ADMIN_DEVICE_COOKIE_NAME] : '';
+        if (!rawRefresh) return writeJson(req, res, 401, { success: false, code: 'REFRESH_REQUIRED', message: '未登录' });
+        if (!deviceId) return writeJson(req, res, 401, { success: false, code: 'DEVICE_REQUIRED', message: '未登录' });
+
+        const tokenHash = sha256Hex(rawRefresh);
+        const [rows] = await state.pool.query(
+          'SELECT id, admin_id, device_id, expires_at, revoked_at FROM admin_refresh_tokens WHERE token_hash = ? LIMIT 1',
+          [tokenHash],
+        );
+        const rt = Array.isArray(rows) && rows.length ? rows[0] : null;
+        if (!rt) return writeJson(req, res, 401, { success: false, code: 'REFRESH_INVALID', message: '未登录' });
+        if (rt.device_id !== deviceId) return writeJson(req, res, 401, { success: false, code: 'REFRESH_INVALID', message: '未登录' });
+        if (rt.revoked_at) return writeJson(req, res, 401, { success: false, code: 'REFRESH_REVOKED', message: '未登录' });
+        if (typeof rt.expires_at === 'string' && Date.parse(rt.expires_at) <= Date.now()) {
+          return writeJson(req, res, 401, { success: false, code: 'REFRESH_EXPIRED', message: '未登录' });
+        }
+
+        const [adminRows] = await state.pool.query(
+          'SELECT id, phone, created_at, last_login_at, is_superadmin FROM admin_user WHERE id = ? LIMIT 1',
+          [rt.admin_id],
+        );
+        const admin = Array.isArray(adminRows) && adminRows.length ? adminRows[0] : null;
+        if (!admin) return writeJson(req, res, 401, { success: false, code: 'REFRESH_INVALID', message: '未登录' });
+
+        const nextRefresh = crypto.randomBytes(32).toString('base64url');
+        const nextHash = sha256Hex(nextRefresh);
+        const nowIso = new Date().toISOString();
+        const expiresIso = new Date(Date.now() + REFRESH_TOKEN_TTL_SEC * 1000).toISOString();
+        const nextId = uuidv4();
+        const ip = typeof req?.socket?.remoteAddress === 'string' ? req.socket.remoteAddress : null;
+        const userAgent = typeof req?.headers?.['user-agent'] === 'string' ? req.headers['user-agent'].slice(0, 255) : null;
+
+        await state.pool.query(
+          'UPDATE admin_refresh_tokens SET revoked_at = ?, replaced_by = ? WHERE id = ? AND revoked_at IS NULL',
+          [nowIso, nextId, rt.id],
+        );
+        await state.pool.query(
+          'INSERT INTO admin_refresh_tokens (id, admin_id, token_hash, device_id, created_at, expires_at, revoked_at, replaced_by, ip, user_agent) VALUES (?,?,?,?,?,?,?,?,?,?)',
+          [nextId, admin.id, nextHash, deviceId, nowIso, expiresIso, null, null, ip, userAgent],
+        );
+
+        const accessToken = await signAccessToken({ user_id: admin.id, username: admin.phone, scope: 'admin' });
+        const secure = getCookieSecure(req);
+        setCookie(res, ADMIN_ACCESS_COOKIE_NAME, accessToken, { path: '/', httpOnly: true, secure, sameSite: 'Lax', maxAgeSeconds: ACCESS_TOKEN_TTL_SEC });
+        setCookie(res, ADMIN_REFRESH_COOKIE_NAME, nextRefresh, { path: '/', httpOnly: true, secure, sameSite: 'Lax', maxAgeSeconds: REFRESH_TOKEN_TTL_SEC });
+
+        return writeJson(req, res, 200, { success: true });
+      }
+
       if (req.method === 'POST' && pathname === '/api/auth/logout') {
         const ok = await ensureDbReady();
         if (!ok) return writeJson(req, res, 503, { success: false, code: 'DB_UNAVAILABLE', message: '数据库不可用' });
@@ -417,6 +572,23 @@ async function main() {
 
         clearCookie(res, ACCESS_COOKIE_NAME);
         clearCookie(res, REFRESH_COOKIE_NAME);
+        return writeJson(req, res, 200, { success: true });
+      }
+
+      if (req.method === 'POST' && pathname === '/api/admin/auth/logout') {
+        const ok = await ensureDbReady();
+        if (!ok) return writeJson(req, res, 503, { success: false, code: 'DB_UNAVAILABLE', message: '数据库不可用' });
+
+        const cookies = parseCookies(req);
+        const rawRefresh = typeof cookies[ADMIN_REFRESH_COOKIE_NAME] === 'string' ? cookies[ADMIN_REFRESH_COOKIE_NAME] : '';
+        if (rawRefresh) {
+          const tokenHash = sha256Hex(rawRefresh);
+          const nowIso = new Date().toISOString();
+          await state.pool.query('UPDATE admin_refresh_tokens SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL', [nowIso, tokenHash]);
+        }
+
+        clearCookie(res, ADMIN_ACCESS_COOKIE_NAME);
+        clearCookie(res, ADMIN_REFRESH_COOKIE_NAME);
         return writeJson(req, res, 200, { success: true });
       }
 
@@ -438,6 +610,34 @@ async function main() {
           if (!user) return writeJson(req, res, 401, { success: false, code: 'UNAUTHORIZED', message: '未登录' });
 
           return writeJson(req, res, 200, { success: true, user: getUserPublic(user) });
+        } catch {
+          return writeJson(req, res, 401, { success: false, code: 'UNAUTHORIZED', message: '未登录' });
+        }
+      }
+
+      if (req.method === 'GET' && pathname === '/api/admin/auth/me') {
+        const cookies = parseCookies(req);
+        const token = typeof cookies[ADMIN_ACCESS_COOKIE_NAME] === 'string' ? cookies[ADMIN_ACCESS_COOKIE_NAME] : '';
+        if (!token) return writeJson(req, res, 401, { success: false, code: 'UNAUTHORIZED', message: '未登录' });
+
+        try {
+          const payload = await verifyAccessToken(token);
+          const scope = typeof payload.scope === 'string' ? payload.scope : '';
+          if (scope !== 'admin') return writeJson(req, res, 401, { success: false, code: 'UNAUTHORIZED', message: '未登录' });
+          const adminId = typeof payload.user_id === 'string' ? payload.user_id : '';
+          if (!adminId) return writeJson(req, res, 401, { success: false, code: 'UNAUTHORIZED', message: '未登录' });
+
+          const ok = await ensureDbReady();
+          if (!ok) return writeJson(req, res, 503, { success: false, code: 'DB_UNAVAILABLE', message: '数据库不可用' });
+
+          const [rows] = await state.pool.query(
+            'SELECT id, phone, created_at, last_login_at, is_superadmin FROM admin_user WHERE id = ? LIMIT 1',
+            [adminId],
+          );
+          const admin = Array.isArray(rows) && rows.length ? rows[0] : null;
+          if (!admin) return writeJson(req, res, 401, { success: false, code: 'UNAUTHORIZED', message: '未登录' });
+
+          return writeJson(req, res, 200, { success: true, admin: getAdminPublic(admin) });
         } catch {
           return writeJson(req, res, 401, { success: false, code: 'UNAUTHORIZED', message: '未登录' });
         }

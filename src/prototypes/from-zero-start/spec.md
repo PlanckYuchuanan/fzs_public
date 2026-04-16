@@ -7,6 +7,7 @@
 ## 页面结构
 
 - 登录页：科技风格登录/注册卡片（手机号 + 密码）
+- 登录页弱入口：右下角“管理员入口”（弱化按钮），跳转到独立管理员登录页
 - 登录后页：
   - 左侧：菜单栏（支持后续扩展）
   - 右侧：主内容区
@@ -56,6 +57,13 @@
   - `id`：用户ID
   - `phone`：手机号（唯一）
   - `created_at`：注册时间
+  - 额外字段（内部使用）：`password_salt`、`password_hash`
+- 管理员表：`admin_user`
+  - `id`：管理员ID
+  - `phone`：手机号（唯一）
+  - `created_at`：创建时间
+  - `last_login_at`：最后登录时间（可空）
+  - `is_superadmin`：是否超管标记
   - 额外字段（内部使用）：`password_salt`、`password_hash`
 - Refresh Token 表：`refresh_tokens`
   - `id`：Refresh Token 记录ID

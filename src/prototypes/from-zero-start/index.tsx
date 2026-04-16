@@ -182,6 +182,11 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
   }, []);
 
   if (!user) {
+    const goAdmin = () => {
+      const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+      window.location.href = isLocal ? '/prototypes/admin-login' : '/prototypes/admin-login.html';
+    };
+
     return (
       <div className="fzs-auth-root">
         <div className="fzs-auth-bg">
@@ -225,6 +230,7 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
             <div className="fzs-auth-hint">
               {authTab === 'register' ? '手机号需为中国大陆 11 位；密码至少 6 位。' : '请输入手机号与密码。'}
             </div>
+            <button className="fzs-admin-entry" type="button" onClick={goAdmin}>管理员入口</button>
           </div>
         </div>
       </div>
