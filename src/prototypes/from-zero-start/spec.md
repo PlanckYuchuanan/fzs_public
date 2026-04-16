@@ -30,6 +30,7 @@
   - 默认选中“仪表盘”
   - 菜单项约 7 个占位，后续可扩展
   - “客户管理”页提供“新增客户”按钮入口
+  - “产品服务”页展示已启用的产品服务列表（只读）
 
 ## Axure 接口
 
@@ -110,4 +111,9 @@
 - `GET /api/auth/me`
   - 说明：读取 Access Token（JWT）并返回当前用户
   - 成功：`{ success: true, user: { userId, phone, registeredAt } }`
+  - 失败：`401`，message 为“未登录”
+
+- `GET /api/product-services`
+  - 说明：仅返回启用状态（is_enabled=1）的产品服务列表（产品端只读展示）
+  - 成功：`{ success: true, services: Array<{ name, wbsCode, description, referenceWeeks, ownerText }> }`
   - 失败：`401`，message 为“未登录”

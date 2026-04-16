@@ -267,6 +267,45 @@
   background: rgba(105, 255, 248, 0.14);
 }
 
+.fzs-ps-root {
+  display: grid;
+  gap: 12px;
+}
+.fzs-ps-table {
+  display: grid;
+  gap: 8px;
+}
+.fzs-ps-row {
+  display: grid;
+  grid-template-columns: 1.2fr 0.9fr 2fr 0.8fr 0.9fr;
+  gap: 10px;
+  align-items: start;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(2, 6, 23, 0.22);
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 13px;
+}
+.fzs-ps-row.header {
+  background: rgba(105, 255, 248, 0.10);
+  border-color: rgba(105, 255, 248, 0.22);
+  font-weight: 900;
+  align-items: center;
+}
+.fzs-ps-row > div {
+  min-width: 0;
+}
+.fzs-ps-name {
+  font-weight: 900;
+  color: rgba(255, 255, 255, 0.94);
+}
+.fzs-ps-desc {
+  white-space: normal;
+  line-height: 1.45;
+  color: rgba(226, 232, 240, 0.86);
+}
+
 .fzs-auth-root {
   min-height: 100vh;
   position: relative;

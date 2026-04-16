@@ -973,6 +973,37 @@ async function main() {
         return writeJson(req, res, 200, { success: true });
       }
 
+      if (req.method === 'GET' && pathname === '/api/product-services') {
+        const cookies = parseCookies(req);
+        const token = typeof cookies[ACCESS_COOKIE_NAME] === 'string' ? cookies[ACCESS_COOKIE_NAME] : '';
+        if (!token) return writeJson(req, res, 401, { success: false, code: 'UNAUTHORIZED', message: '未登录' });
+
+        try {
+          const payload = await verifyAccessToken(token);
+          const scope = typeof payload.scope === 'string' ? payload.scope : '';
+          if (scope !== 'user') return writeJson(req, res, 401, { success: false, code: 'UNAUTHORIZED', message: '未登录' });
+        } catch {
+          return writeJson(req, res, 401, { success: false, code: 'UNAUTHORIZED', message: '未登录' });
+        }
+
+        const ok = await ensureDbReady();
+        if (!ok) return writeJson(req, res, 503, { success: false, code: 'DB_UNAVAILABLE', message: '数据库不可用' });
+
+        const [rows] = await state.pool.query(
+          'SELECT name, wbs_code, description, reference_weeks, owner_text FROM product_services WHERE is_enabled = 1 ORDER BY created_at DESC',
+        );
+        const services = Array.isArray(rows)
+          ? rows.map((r) => ({
+            name: r.name,
+            wbsCode: r.wbs_code,
+            description: r.description || '',
+            referenceWeeks: typeof r.reference_weeks === 'number' ? r.reference_weeks : Number(r.reference_weeks || 0),
+            ownerText: r.owner_text || '',
+          }))
+          : [];
+        return writeJson(req, res, 200, { success: true, services });
+      }
+
       if (req.method === 'GET' && pathname === '/api/admin/admin-users') {
         const auth = await resolveAdminFromRequest(req);
         if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });

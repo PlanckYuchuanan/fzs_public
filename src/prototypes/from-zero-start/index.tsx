@@ -29,6 +29,14 @@ const NAV_ITEMS: Array<{ id: string; label: string; desc: string }> = [
   { id: 'settings', label: '系统设置', desc: '权限与配置（占位）' },
 ];
 
+type ProductServicePublicRow = {
+  name: string;
+  wbsCode: string;
+  description: string;
+  referenceWeeks: number;
+  ownerText: string;
+};
+
 const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroStart(innerProps, ref) {
   const onEvent = typeof innerProps?.onEvent === 'function' ? innerProps.onEvent : function () {};
 
@@ -39,6 +47,9 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
   const [user, setUser] = useState<{ userId: string; phone: string; registeredAt: string } | null>(null);
   const [authBusy, setAuthBusy] = useState<boolean>(false);
   const [navId, setNavId] = useState<string>('dashboard');
+  const [productServices, setProductServices] = useState<ProductServicePublicRow[]>([]);
+  const [productServicesBusy, setProductServicesBusy] = useState<boolean>(false);
+  const [productServicesError, setProductServicesError] = useState<string>('');
 
   const apiBaseUrl = useMemo(function () {
     const configured = (innerProps?.config && typeof (innerProps.config as any).apiBaseUrl === 'string')
@@ -62,7 +73,12 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
   }, [innerProps?.config]);
 
   const fetchJson = useCallback(async function (path: string, options?: RequestInit) {
-    const res = await fetch(`${apiBaseUrl}${path}`, {
+    const normalizedBase = apiBaseUrl.replace(/\/$/, '');
+    const normalizedPath = normalizedBase.endsWith('/api') && path.startsWith('/api/')
+      ? path.replace(/^\/api/, '')
+      : path;
+
+    const res = await fetch(`${normalizedBase}${normalizedPath}`, {
       credentials: 'include',
       ...options,
       headers: {
@@ -156,6 +172,35 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
     setUser(null);
   }, [fetchJson]);
 
+  const loadProductServices = useCallback(async function () {
+    setProductServicesBusy(true);
+    setProductServicesError('');
+    try {
+      const { res, json } = await fetchJson('/api/product-services', { method: 'GET' });
+      if (res.ok && json?.success && Array.isArray(json.services)) {
+        setProductServices(json.services);
+        return;
+      }
+      if (res.status === 401) {
+        const refreshed = await fetchJson('/api/auth/refresh', { method: 'POST', body: '{}' });
+        if (refreshed.res.ok && refreshed.json?.success) {
+          const retry = await fetchJson('/api/product-services', { method: 'GET' });
+          if (retry.res.ok && retry.json?.success && Array.isArray(retry.json.services)) {
+            setProductServices(retry.json.services);
+            return;
+          }
+        }
+        setUser(null);
+        return;
+      }
+      setProductServicesError(typeof json?.message === 'string' && json.message ? json.message : '加载失败');
+    } catch (e: any) {
+      setProductServicesError(e?.message || '网络错误');
+    } finally {
+      setProductServicesBusy(false);
+    }
+  }, [fetchJson]);
+
   useEffect(() => {
     void loadMe();
   }, [loadMe]);
@@ -166,6 +211,12 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
     }, 60_000);
     return () => window.clearInterval(id);
   }, [loadMe]);
+
+  useEffect(() => {
+    if (!user) return;
+    if (navId !== 'products') return;
+    void loadProductServices();
+  }, [loadProductServices, navId, user]);
 
   React.useImperativeHandle(ref, function () {
     return {
@@ -329,9 +380,34 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
                 </div>
               )}
               {activeNav.id === 'products' && (
-                <div className="fzs-empty-block">
-                  <div className="fzs-empty-title">产品服务</div>
-                  <div className="fzs-empty-desc">功能与数据将由你这边定义并接入。</div>
+                <div className="fzs-ps-root">
+                  {productServicesError && <div className="fzs-error">{productServicesError}</div>}
+                  <div className="fzs-ps-table">
+                    <div className="fzs-ps-row header">
+                      <div>产品服务名称</div><div>WBS编码</div><div>描述</div><div>参考时间</div><div>责任方</div>
+                    </div>
+                    {productServicesBusy ? (
+                      <div className="fzs-empty-block">
+                        <div className="fzs-empty-title">加载中...</div>
+                        <div className="fzs-empty-desc">正在获取已启用的产品服务。</div>
+                      </div>
+                    ) : productServices.length === 0 ? (
+                      <div className="fzs-empty-block">
+                        <div className="fzs-empty-title">暂无数据</div>
+                        <div className="fzs-empty-desc">当前没有启用状态的产品服务。</div>
+                      </div>
+                    ) : (
+                      productServices.map((s, idx) => (
+                        <div key={`${s.wbsCode}-${idx}`} className="fzs-ps-row">
+                          <div className="fzs-ps-name">{s.name}</div>
+                          <div>{s.wbsCode}</div>
+                          <div className="fzs-ps-desc">{s.description || '-'}</div>
+                          <div>{`${s.referenceWeeks} 周`}</div>
+                          <div>{s.ownerText || '-'}</div>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
               )}
               {activeNav.id === 'analytics' && (
@@ -355,4 +431,3 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
 });
 
 export default Component;
-
