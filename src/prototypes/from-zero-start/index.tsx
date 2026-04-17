@@ -109,14 +109,35 @@ function App() {
       ? path.replace(/^\/api/, '')
       : path;
 
-    const res = await fetch(`${normalizedBase}${normalizedPath}`, {
-      credentials: 'include',
-      ...options,
-      headers: {
-        'content-type': 'application/json',
-        ...(options?.headers || {}),
-      },
-    });
+    const canRetry = options?.body == null || typeof options?.body === 'string';
+    const refreshable = path !== '/api/auth/refresh' && !path.startsWith('/api/auth/');
+
+    async function requestOnce(requestPath: string, requestOptions?: RequestInit) {
+      const normalizedRequestPath = normalizedBase.endsWith('/api') && requestPath.startsWith('/api/')
+        ? requestPath.replace(/^\/api/, '')
+        : requestPath;
+
+      return fetch(`${normalizedBase}${normalizedRequestPath}`, {
+        credentials: 'include',
+        ...requestOptions,
+        headers: {
+          'content-type': 'application/json',
+          ...(requestOptions?.headers || {}),
+        },
+      });
+    }
+
+    const res = await requestOnce(normalizedPath, options);
+    if (res.status === 401 && canRetry && refreshable) {
+      const refreshRes = await requestOnce('/api/auth/refresh', { method: 'POST', body: '{}' });
+      const refreshJson = await refreshRes.json().catch(() => null);
+      if (refreshRes.ok && refreshJson?.success) {
+        const retryRes = await requestOnce(normalizedPath, options);
+        const retryJson = await retryRes.json().catch(() => null);
+        return { res: retryRes, json: retryJson };
+      }
+    }
+
     const json = await res.json().catch(() => null);
     return { res, json };
   }, [apiBaseUrl]);
