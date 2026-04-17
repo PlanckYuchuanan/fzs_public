@@ -18,5 +18,5 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src", "scripts", "tests/test-ai-cli.mjs"]
+  "include": ["src", "scripts", "vite-plugins", "vite.config.ts", "tests/test-ai-cli.mjs"]
 }

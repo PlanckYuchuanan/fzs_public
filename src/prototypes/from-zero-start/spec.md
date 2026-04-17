@@ -1,3 +1,7 @@
+这是项目FZS的文档；
+端：用户端；
+共享：同一 MySQL+同一后端 server/index.mjs；路由前缀：/api vs /api/admin
+
 # 从零开始
 
 ## 页面目标
@@ -16,8 +20,7 @@
 
 ## 交互说明
 
-- 点击“新增客户”触发事件：`onCreateCustomer`
-- 事件 payload：`{}`（JSON 字符串）
+- 客户管理：点击“新增客户”为预留入口（后续接入具体交互）
 - 注册：
   - 手机号作为创建账号的唯一依据
   - 手机号校验：符合中国大陆手机号规则（11 位，`^1[3-9]\\d{9}$`）
@@ -29,14 +32,15 @@
 - 导航：
   - 默认选中“仪表盘”
   - 菜单项约 7 个占位，后续可扩展
-  - “客户管理”页提供“新增客户”按钮入口
+  - “客户管理”页：
+    - 主体为客户列表（尽量展示完整企业信息，隐藏内部 id/创建时间等辅助字段）
+    - 右侧为操作区，提供“客户登记”按钮
+    - 客户登记弹窗：
+      - 顶部为第三方查询输入框（按公司名称查询企业列表）
+      - 查询结果仅允许单选一条企业信息
+      - 点击“提交”登记成功，并写入 MySQL（仅持久化用户最终选择的一条）
   - “产品服务”页展示已启用的产品服务列表（只读）
-
-## Axure 接口
-
-- 事件：`onCreateCustomer`
-- 动作：无
-- 变量：无
+  - “制单管理”页：占位（待后续定义）
 
 ## 后端与数据库
 
@@ -78,6 +82,28 @@
   - `ip`：客户端IP（可空）
   - `user_agent`：客户端 UA（可空）
 
+- 客户表：`customers`
+  - `id`：客户ID
+  - `user_id`：用户ID
+  - 去重规则：同一用户 `company_name` 唯一（暂按企业名称去重）
+  - 企业信息（来自第三方查询结果，持久化用户最终选择的一条）：
+    - `company_key_no`：KeyNo
+    - `company_name`：企业名称
+    - `company_status`：企业状态（存续等）
+    - `credit_code`：统一社会信用代码
+    - `reg_no`：注册号（No）
+    - `oper_name`：法人
+    - `address`：地址
+    - `start_date`：成立日期
+  - 统计字段（初始为 0，后续由其它动作维护；页面以可点击按钮展示）：
+    - `active_followup_count`：活跃跟进记录数
+    - `active_project_count`：活跃项目个数
+    - `signing_project_count`：签约中项目个数
+  - 来源字段：
+    - `source`：固定 `tripartite_company_search`
+    - `source_order_number`：第三方 OrderNumber（可空）
+  - `created_at`：创建时间
+
 ## 登录态方案
 
 - 采用 JWT + Refresh Token 双令牌
@@ -117,3 +143,62 @@
   - 说明：仅返回启用状态（is_enabled=1）的产品服务列表（产品端只读展示）
   - 成功：`{ success: true, services: Array<{ name, wbsCode, description, referenceWeeks, ownerText, typeId, typeName }>, types: Array<{ typeId, name }> }`
   - 失败：`401`，message 为“未登录”
+
+- `POST /api/company-search`
+  - 说明：按公司名称查询企业列表（服务端代理第三方 companySearch）
+  - body：`{ companyName: string, pageSize: number, pageIndex: number }`
+  - 成功：`{ success: true, orderNumber: string, paging: { pageSize, pageIndex, totalRecords }, results: Array<{ keyNo, name, status, creditCode, regNo, operName, address, startDate }> }`
+  - 失败：`{ success: false, code, message }`
+
+- `GET /api/customers`
+  - 说明：获取当前用户已添加客户列表（仅返回当前用户自己的数据）
+  - 成功：`{ success: true, customers: Array<{ customerId, createdAt, source, sourceOrderNumber, company: { keyNo, name, status, creditCode, regNo, operName, address, startDate } }> }`
+
+- `POST /api/customers/create`
+  - 说明：添加客户（仅持久化用户最终选择的一条企业信息；暂按企业名称去重）
+  - body：`{ orderNumber?: string, company: { keyNo, name, status?, creditCode?, regNo?, operName?, address?, startDate? } }`
+  - 成功：`{ success: true, customer: { customerId, createdAt, source, sourceOrderNumber, company } }`
+  - 失败：重复添加返回 `409`，code 为 `CUSTOMER_EXISTS`
+
+## 第三方接口（Tripartite）
+
+### 对接信息
+
+- 测试地址：`http://tr.yeyeku.com/gs_tripartite_web/openapi/service/<servicePath>`
+- 请求类型：`POST`
+- Content-Type：`application/json;charset=utf-8`
+- 公共参数（body）：
+  - `clientId`：客户端 id（string）
+  - `requestId`：请求ID（string，不可重复，推荐 uuid）
+  - `scene`：场景（string，业务方自定义）
+  - `timestamp`：时间戳（long）
+  - `signType`：默认 `RSA2`
+  - `sign`：签名（string，Base64）
+  - `data`：json 字符串（string，具体字段见各 service 的文档）
+
+### 签名规则（RSA2）
+
+- 将参数按参数名称升序排序，拼成 `key=value&key=value` 得到 `sortStr`
+- 使用开发者中心的 RSA 私钥对 `sortStr` 做 `SHA256WithRSA` 签名，结果 Base64 作为 `sign`
+
+### 本项目调用方式（服务端代理）
+
+- 管理端调用接口：`POST /api/admin/tripartite/call`
+- body：
+  - `servicePath`：第三方 service 路径（如 `xxx/yyy`）
+  - `scene`：场景
+  - `data`：对象或字符串；对象会在服务端 `JSON.stringify` 后参与签名并透传
+  - `requestId` / `timestamp` / `clientId` / `signType`：可选；不传则由服务端生成或读取配置
+- 返回：
+  - 成功：`{ success: true, upstream: { statusCode, data } }`
+  - 失败：`{ success: false, code, message, upstream? }`
+
+### 配置项（环境变量）
+
+- `TRIPARTITE_BASE_URL`：第三方 base url（默认 `http://tr.yeyeku.com/gs_tripartite_web/openapi/service`）
+- `TRIPARTITE_CLIENT_ID`：第三方 clientId
+- `TRIPARTITE_SIGN_TYPE`：默认 `RSA2`
+- `TRIPARTITE_RSA_PRIVATE_KEY`：开发者 RSA 私钥（PKCS8，支持 PEM 或 base64）
+- `TRIPARTITE_RSA_PRIVATE_KEY_FILE`：开发者 RSA 私钥文件路径（优先级低于 `TRIPARTITE_RSA_PRIVATE_KEY`）
+- `TRIPARTITE_PLATFORM_PUBLIC_KEY`：平台公钥（base64，预留用于验签）
+- `TRIPARTITE_PLATFORM_PUBLIC_KEY_FILE`：平台公钥文件路径（优先级低于 `TRIPARTITE_PLATFORM_PUBLIC_KEY`）

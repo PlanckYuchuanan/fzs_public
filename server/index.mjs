@@ -1,9 +1,42 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import http from 'node:http';
+import https from 'node:https';
+import path from 'node:path';
 
 import { SignJWT, jwtVerify } from 'jose';
 import mysql from 'mysql2/promise';
 import { v4 as uuidv4 } from 'uuid';
+
+function loadDotEnvIfPresent(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) return;
+    const content = fs.readFileSync(filePath, 'utf8');
+    const lines = content.split(/\r?\n/);
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      if (trimmed.startsWith('#')) continue;
+      const idx = trimmed.indexOf('=');
+      if (idx < 0) continue;
+      const key = trimmed.slice(0, idx).trim();
+      if (!key) continue;
+      if (Object.prototype.hasOwnProperty.call(process.env, key)) continue;
+      let value = trimmed.slice(idx + 1).trim();
+      if (
+        (value.startsWith('"') && value.endsWith('"') && value.length >= 2) ||
+        (value.startsWith("'") && value.endsWith("'") && value.length >= 2)
+      ) {
+        value = value.slice(1, -1);
+      }
+      process.env[key] = value;
+    }
+  } catch {}
+}
+
+const envRoot = process.cwd();
+loadDotEnvIfPresent(path.join(envRoot, '.env.local'));
+loadDotEnvIfPresent(path.join(envRoot, '.env'));
 
 const PORT = Number(process.env.PORT || 32123);
 const DB_HOST = process.env.DB_HOST || '127.0.0.1';
@@ -15,12 +48,122 @@ const JWT_SECRET = process.env.JWT_SECRET || 'dev-jwt-secret-change-me';
 const ACCESS_TOKEN_TTL_SEC = Number(process.env.ACCESS_TOKEN_TTL_SEC || 15 * 60);
 const REFRESH_TOKEN_TTL_SEC = Number(process.env.REFRESH_TOKEN_TTL_SEC || 7 * 24 * 60 * 60);
 const COOKIE_SECURE = String(process.env.COOKIE_SECURE || '').toLowerCase() === 'true';
+const TRIPARTITE_BASE_URL = process.env.TRIPARTITE_BASE_URL || 'http://tr.yeyeku.com/gs_tripartite_web/openapi/service';
+const TRIPARTITE_CLIENT_ID = process.env.TRIPARTITE_CLIENT_ID || '100134';
+const TRIPARTITE_SIGN_TYPE = process.env.TRIPARTITE_SIGN_TYPE || 'RSA2';
+const TRIPARTITE_RSA_PRIVATE_KEY = process.env.TRIPARTITE_RSA_PRIVATE_KEY || '';
+const TRIPARTITE_RSA_PRIVATE_KEY_FILE = process.env.TRIPARTITE_RSA_PRIVATE_KEY_FILE || '';
+const TRIPARTITE_PLATFORM_PUBLIC_KEY = process.env.TRIPARTITE_PLATFORM_PUBLIC_KEY || '';
+const TRIPARTITE_PLATFORM_PUBLIC_KEY_FILE = process.env.TRIPARTITE_PLATFORM_PUBLIC_KEY_FILE || '';
 const ACCESS_COOKIE_NAME = 'ax_access';
 const REFRESH_COOKIE_NAME = 'ax_refresh';
 const DEVICE_COOKIE_NAME = 'ax_device';
 const ADMIN_ACCESS_COOKIE_NAME = 'ax_admin_access';
 const ADMIN_REFRESH_COOKIE_NAME = 'ax_admin_refresh';
 const ADMIN_DEVICE_COOKIE_NAME = 'ax_admin_device';
+
+function readSecretFromEnvOrFile(directValue, filePath) {
+  if (typeof directValue === 'string' && directValue.trim()) return directValue.trim();
+  if (typeof filePath !== 'string' || !filePath.trim()) return '';
+  try {
+    return fs.readFileSync(filePath.trim(), 'utf8').trim();
+  } catch {
+    return '';
+  }
+}
+
+const TRIPARTITE_RSA_PRIVATE_KEY_RAW = readSecretFromEnvOrFile(TRIPARTITE_RSA_PRIVATE_KEY, TRIPARTITE_RSA_PRIVATE_KEY_FILE);
+const TRIPARTITE_PLATFORM_PUBLIC_KEY_RAW = readSecretFromEnvOrFile(TRIPARTITE_PLATFORM_PUBLIC_KEY, TRIPARTITE_PLATFORM_PUBLIC_KEY_FILE);
+
+function normalizePkcs8PrivateKey(privateKey) {
+  if (typeof privateKey !== 'string') return null;
+  const trimmed = privateKey.trim();
+  if (!trimmed) return null;
+
+  if (/BEGIN (RSA )?PRIVATE KEY/.test(trimmed)) {
+    return crypto.createPrivateKey({ key: trimmed });
+  }
+
+  const base64 = trimmed.replace(/\s+/g, '');
+  if (!/^[A-Za-z0-9+/=]+$/.test(base64)) return null;
+  try {
+    return crypto.createPrivateKey({ key: Buffer.from(base64, 'base64'), format: 'der', type: 'pkcs8' });
+  } catch {
+    const wrapped = `-----BEGIN PRIVATE KEY-----\n${base64.match(/.{1,64}/g)?.join('\n') || base64}\n-----END PRIVATE KEY-----`;
+    return crypto.createPrivateKey({ key: wrapped });
+  }
+}
+
+function buildSortedQueryString(params) {
+  const keys = Object.keys(params).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return keys.map((k) => `${k}=${String(params[k])}`).join('&');
+}
+
+function rsaSha256SignBase64(payload, privateKeyObject) {
+  const signer = crypto.createSign('RSA-SHA256');
+  signer.update(payload, 'utf8');
+  signer.end();
+  return signer.sign(privateKeyObject).toString('base64');
+}
+
+function isSafeServicePath(value) {
+  if (typeof value !== 'string') return false;
+  const normalized = value.trim();
+  if (!normalized) return false;
+  if (normalized.startsWith('http://') || normalized.startsWith('https://')) return false;
+  if (normalized.startsWith('/')) return false;
+  if (normalized.includes('..')) return false;
+  return /^[A-Za-z0-9/_-]+$/.test(normalized);
+}
+
+function httpRequestJson(urlString, body, timeoutMs = 12_000) {
+  return new Promise((resolve, reject) => {
+    const url = new URL(urlString);
+    const rawBody = JSON.stringify(body);
+
+    const req = (url.protocol === 'https:' ? https : http).request(
+      {
+        protocol: url.protocol,
+        hostname: url.hostname,
+        port: url.port || (url.protocol === 'https:' ? 443 : 80),
+        method: 'POST',
+        path: `${url.pathname}${url.search}`,
+        headers: {
+          'Content-Type': 'application/json;charset=utf-8',
+          'Content-Length': Buffer.byteLength(rawBody),
+        },
+      },
+      (res) => {
+        let data = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => (data += chunk));
+        res.on('end', () => {
+          const statusCode = res.statusCode || 0;
+          const contentType = String(res.headers['content-type'] || '').toLowerCase();
+          if (contentType.includes('application/json')) {
+            try {
+              resolve({ statusCode, data: data ? JSON.parse(data) : {} });
+              return;
+            } catch {
+              resolve({ statusCode, data: { raw: data } });
+              return;
+            }
+          }
+          try {
+            resolve({ statusCode, data: data ? JSON.parse(data) : {} });
+          } catch {
+            resolve({ statusCode, data: { raw: data } });
+          }
+        });
+      },
+    );
+
+    req.on('error', reject);
+    req.setTimeout(timeoutMs, () => req.destroy(new Error('upstream_timeout')));
+    req.write(rawBody);
+    req.end();
+  });
+}
 
 function getCorsHeaders(req) {
   const origin = typeof req?.headers?.origin === 'string' ? req.headers.origin : '';
@@ -376,6 +519,66 @@ async function ensureDbReady() {
     await state.pool.query('CREATE UNIQUE INDEX idx_product_services_name ON product_services(name);').catch(() => {});
     await state.pool.query('CREATE UNIQUE INDEX idx_product_services_wbs_code ON product_services(wbs_code);').catch(() => {});
 
+    await state.pool.query(`
+      CREATE TABLE IF NOT EXISTS orders (
+        id VARCHAR(36) PRIMARY KEY,
+        user_id VARCHAR(36) NOT NULL,
+        company_key_no VARCHAR(64) NOT NULL,
+        company_name VARCHAR(256) NOT NULL,
+        company_status VARCHAR(32) NULL,
+        credit_code VARCHAR(64) NULL,
+        reg_no VARCHAR(64) NULL,
+        oper_name VARCHAR(128) NULL,
+        address VARCHAR(512) NULL,
+        start_date VARCHAR(32) NULL,
+        source VARCHAR(64) NOT NULL DEFAULT 'tripartite_company_search',
+        source_order_number VARCHAR(64) NULL,
+        created_at VARCHAR(32) NOT NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+    await state.pool.query('CREATE INDEX idx_orders_user ON orders(user_id);').catch(() => {});
+    await state.pool.query('CREATE INDEX idx_orders_company_key_no ON orders(company_key_no);').catch(() => {});
+
+    await state.pool.query(`
+      CREATE TABLE IF NOT EXISTS customers (
+        id VARCHAR(36) PRIMARY KEY,
+        user_id VARCHAR(36) NOT NULL,
+        company_key_no VARCHAR(64) NOT NULL,
+        company_name VARCHAR(256) NOT NULL,
+        company_status VARCHAR(32) NULL,
+        credit_code VARCHAR(64) NULL,
+        reg_no VARCHAR(64) NULL,
+        oper_name VARCHAR(128) NULL,
+        address VARCHAR(512) NULL,
+        start_date VARCHAR(32) NULL,
+        active_followup_count INT NOT NULL DEFAULT 0,
+        active_project_count INT NOT NULL DEFAULT 0,
+        signing_project_count INT NOT NULL DEFAULT 0,
+        source VARCHAR(64) NOT NULL DEFAULT 'tripartite_company_search',
+        source_order_number VARCHAR(64) NULL,
+        created_at VARCHAR(32) NOT NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+    await ensureColumn('customers', 'active_followup_count', 'ALTER TABLE customers ADD COLUMN active_followup_count INT NOT NULL DEFAULT 0').catch(() => {});
+    await ensureColumn('customers', 'active_project_count', 'ALTER TABLE customers ADD COLUMN active_project_count INT NOT NULL DEFAULT 0').catch(() => {});
+    await ensureColumn('customers', 'signing_project_count', 'ALTER TABLE customers ADD COLUMN signing_project_count INT NOT NULL DEFAULT 0').catch(() => {});
+    await state.pool.query('CREATE INDEX idx_customers_user ON customers(user_id);').catch(() => {});
+    await state.pool.query('CREATE INDEX idx_customers_company_key_no ON customers(company_key_no);').catch(() => {});
+    await state.pool.query('ALTER TABLE customers DROP INDEX idx_customers_user_company;').catch(() => {});
+    await state.pool.query('CREATE UNIQUE INDEX idx_customers_user_name ON customers(user_id, company_name);').catch(() => {});
+
+    await state.pool.query(`
+      INSERT IGNORE INTO customers (
+        id, user_id, company_key_no, company_name, company_status, credit_code, reg_no, oper_name, address, start_date, source, source_order_number, created_at,
+        active_followup_count, active_project_count, signing_project_count
+      )
+      SELECT
+        id, user_id, company_key_no, company_name, company_status, credit_code, reg_no, oper_name, address, start_date, source, source_order_number, created_at,
+        0, 0, 0
+      FROM orders
+      ORDER BY created_at DESC
+    `).catch(() => {});
+
     state.dbReady = true;
     state.dbReadyMessage = '';
     return true;
@@ -410,6 +613,32 @@ async function resolveAdminFromRequest(req) {
     if (admin.is_enabled === 0) return { ok: false, statusCode: 403, code: 'ACCOUNT_DISABLED', message: '管理员账号已停用' };
 
     return { ok: true, admin };
+  } catch {
+    return { ok: false, statusCode: 401, code: 'UNAUTHORIZED', message: '未登录' };
+  }
+}
+
+async function resolveUserFromRequest(req) {
+  const cookies = parseCookies(req);
+  const token = typeof cookies[ACCESS_COOKIE_NAME] === 'string' ? cookies[ACCESS_COOKIE_NAME] : '';
+  if (!token) return { ok: false, statusCode: 401, code: 'UNAUTHORIZED', message: '未登录' };
+
+  try {
+    const payload = await verifyAccessToken(token);
+    const scope = typeof payload.scope === 'string' ? payload.scope : '';
+    if (scope !== 'user') return { ok: false, statusCode: 401, code: 'UNAUTHORIZED', message: '未登录' };
+    const userId = typeof payload.user_id === 'string' ? payload.user_id : '';
+    if (!userId) return { ok: false, statusCode: 401, code: 'UNAUTHORIZED', message: '未登录' };
+
+    const ok = await ensureDbReady();
+    if (!ok) return { ok: false, statusCode: 503, code: 'DB_UNAVAILABLE', message: '数据库不可用' };
+
+    const [rows] = await state.pool.query('SELECT id, phone, created_at, is_enabled FROM users WHERE id = ? LIMIT 1', [userId]);
+    const user = Array.isArray(rows) && rows.length ? rows[0] : null;
+    if (!user) return { ok: false, statusCode: 401, code: 'UNAUTHORIZED', message: '未登录' };
+    if (user.is_enabled === 0) return { ok: false, statusCode: 403, code: 'ACCOUNT_DISABLED', message: '账号已停用' };
+
+    return { ok: true, user };
   } catch {
     return { ok: false, statusCode: 401, code: 'UNAUTHORIZED', message: '未登录' };
   }
@@ -1097,6 +1326,185 @@ async function main() {
         return writeJson(req, res, 200, { success: true, services, types });
       }
 
+      if (req.method === 'POST' && pathname === '/api/company-search') {
+        const auth = await resolveUserFromRequest(req);
+        if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });
+
+        const body = await readJson(req);
+        const companyName = typeof body?.companyName === 'string' ? body.companyName.trim() : '';
+        const pageSizeRaw = body?.pageSize;
+        const pageIndexRaw = body?.pageIndex;
+        const pageSize = Math.min(50, Math.max(1, Number.isFinite(pageSizeRaw) ? Number(pageSizeRaw) : Number.parseInt(String(pageSizeRaw || 10), 10) || 10));
+        const pageIndex = Math.max(1, Number.isFinite(pageIndexRaw) ? Number(pageIndexRaw) : Number.parseInt(String(pageIndexRaw || 1), 10) || 1);
+        const scene = typeof body?.scene === 'string' && body.scene.trim() ? body.scene.trim() : 'companySearch';
+
+        if (!companyName) return writeJson(req, res, 400, { success: false, code: 'COMPANY_NAME_REQUIRED', message: '缺少 companyName' });
+
+        const privateKeyObject = normalizePkcs8PrivateKey(TRIPARTITE_RSA_PRIVATE_KEY_RAW);
+        if (!privateKeyObject) {
+          return writeJson(req, res, 500, { success: false, code: 'CONFIG_MISSING', message: '缺少 TRIPARTITE_RSA_PRIVATE_KEY（或 TRIPARTITE_RSA_PRIVATE_KEY_FILE）' });
+        }
+
+        const dataValue = JSON.stringify({ companyName, pageSize, pageIndex });
+        const requestId = uuidv4();
+        const timestamp = Date.now();
+        const clientId = TRIPARTITE_CLIENT_ID;
+        const signType = TRIPARTITE_SIGN_TYPE || 'RSA2';
+
+        if (!clientId) return writeJson(req, res, 500, { success: false, code: 'CONFIG_MISSING', message: '缺少 TRIPARTITE_CLIENT_ID' });
+        if (!TRIPARTITE_BASE_URL) return writeJson(req, res, 500, { success: false, code: 'CONFIG_MISSING', message: '缺少 TRIPARTITE_BASE_URL' });
+
+        const paramsForSign = { clientId, data: dataValue, requestId, scene, signType, timestamp };
+        const sortStr = buildSortedQueryString(paramsForSign);
+        const sign = rsaSha256SignBase64(sortStr, privateKeyObject);
+
+        const requestBody = { ...paramsForSign, sign };
+        const upstreamUrl = `${TRIPARTITE_BASE_URL.replace(/\/+$/, '')}/companySearch`;
+
+        try {
+          const upstream = await httpRequestJson(upstreamUrl, requestBody, 12_000);
+          const statusCode = upstream.statusCode || 0;
+          if (statusCode < 200 || statusCode >= 300) {
+            return writeJson(req, res, 502, { success: false, code: 'UPSTREAM_ERROR', message: '第三方接口调用失败', upstream: { statusCode, data: upstream.data } });
+          }
+
+          const upstreamData = upstream.data || {};
+          const code = Number(upstreamData?.code ?? -1);
+          const message = typeof upstreamData?.message === 'string' ? upstreamData.message : '';
+          const data = upstreamData?.data || {};
+          const paging = data?.Paging || {};
+          const orderNumber = typeof data?.OrderNumber === 'string' ? data.OrderNumber : '';
+          const results = Array.isArray(data?.Result)
+            ? data.Result.map((r) => ({
+              keyNo: r?.KeyNo || '',
+              startDate: r?.StartDate || '',
+              status: r?.Status || '',
+              creditCode: r?.CreditCode || '',
+              regNo: r?.No || '',
+              operName: r?.OperName || '',
+              address: r?.Address || '',
+              name: r?.Name || '',
+            }))
+            : [];
+
+          return writeJson(req, res, 200, {
+            success: code === 0,
+            code,
+            message: message || (code === 0 ? 'ok' : 'upstream_error'),
+            orderNumber,
+            paging: {
+              pageSize: Number(paging?.PageSize || pageSize),
+              pageIndex: Number(paging?.PageIndex || pageIndex),
+              totalRecords: Number(paging?.TotalRecords || 0),
+            },
+            results,
+            upstream: { statusCode, data: upstreamData },
+          });
+        } catch (e) {
+          return writeJson(req, res, 502, { success: false, code: 'UPSTREAM_UNAVAILABLE', message: e?.message || 'upstream_unavailable' });
+        }
+      }
+
+      if (req.method === 'GET' && pathname === '/api/customers') {
+        const auth = await resolveUserFromRequest(req);
+        if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });
+
+        const [rows] = await state.pool.query(
+          `SELECT id, user_id, company_key_no, company_name, company_status, credit_code, reg_no, oper_name, address, start_date,
+           active_followup_count, active_project_count, signing_project_count,
+           source, source_order_number, created_at
+           FROM customers
+           WHERE user_id = ?
+           ORDER BY created_at DESC
+           LIMIT 100`,
+          [auth.user.id],
+        );
+        const customers = Array.isArray(rows)
+          ? rows.map((r) => ({
+            customerId: r.id,
+            createdAt: r.created_at,
+            company: {
+              keyNo: r.company_key_no,
+              name: r.company_name,
+              status: r.company_status || '',
+              creditCode: r.credit_code || '',
+              regNo: r.reg_no || '',
+              operName: r.oper_name || '',
+              address: r.address || '',
+              startDate: r.start_date || '',
+            },
+            activeFollowupCount: Number(r.active_followup_count || 0),
+            activeProjectCount: Number(r.active_project_count || 0),
+            signingProjectCount: Number(r.signing_project_count || 0),
+            source: r.source,
+            sourceOrderNumber: r.source_order_number || '',
+          }))
+          : [];
+        return writeJson(req, res, 200, { success: true, customers });
+      }
+
+      if (req.method === 'POST' && pathname === '/api/customers/create') {
+        const auth = await resolveUserFromRequest(req);
+        if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });
+
+        const body = await readJson(req);
+        const company = body?.company || {};
+        const keyNo = typeof company?.keyNo === 'string' ? company.keyNo : (typeof company?.KeyNo === 'string' ? company.KeyNo : '');
+        const name = typeof company?.name === 'string' ? company.name : (typeof company?.Name === 'string' ? company.Name : '');
+        const status = typeof company?.status === 'string' ? company.status : (typeof company?.Status === 'string' ? company.Status : '');
+        const creditCode = typeof company?.creditCode === 'string' ? company.creditCode : (typeof company?.CreditCode === 'string' ? company.CreditCode : '');
+        const regNo = typeof company?.regNo === 'string' ? company.regNo : (typeof company?.No === 'string' ? company.No : '');
+        const operName = typeof company?.operName === 'string' ? company.operName : (typeof company?.OperName === 'string' ? company.OperName : '');
+        const address = typeof company?.address === 'string' ? company.address : (typeof company?.Address === 'string' ? company.Address : '');
+        const startDate = typeof company?.startDate === 'string' ? company.startDate : (typeof company?.StartDate === 'string' ? company.StartDate : '');
+        const sourceOrderNumber = typeof body?.orderNumber === 'string' ? body.orderNumber : '';
+
+        if (!keyNo) return writeJson(req, res, 400, { success: false, code: 'KEY_NO_REQUIRED', message: '缺少 KeyNo' });
+        if (!name) return writeJson(req, res, 400, { success: false, code: 'COMPANY_NAME_REQUIRED', message: '缺少 Name' });
+
+        const [existRows] = await state.pool.query('SELECT id FROM customers WHERE user_id = ? AND company_name = ? LIMIT 1', [
+          auth.user.id,
+          name,
+        ]);
+        const existed = Array.isArray(existRows) && existRows.length ? existRows[0] : null;
+        if (existed?.id) return writeJson(req, res, 409, { success: false, code: 'CUSTOMER_EXISTS', message: '客户已存在' });
+
+        const customerId = uuidv4();
+        const createdAt = new Date().toISOString();
+        await state.pool.query(
+          'INSERT INTO customers (id, user_id, company_key_no, company_name, company_status, credit_code, reg_no, oper_name, address, start_date, active_followup_count, active_project_count, signing_project_count, source, source_order_number, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+          [
+            customerId,
+            auth.user.id,
+            keyNo,
+            name,
+            status || null,
+            creditCode || null,
+            regNo || null,
+            operName || null,
+            address || null,
+            startDate || null,
+            0,
+            0,
+            0,
+            'tripartite_company_search',
+            sourceOrderNumber || null,
+            createdAt,
+          ],
+        );
+
+        return writeJson(req, res, 200, {
+          success: true,
+          customer: {
+            customerId,
+            createdAt,
+            company: { keyNo, name, status, creditCode, regNo, operName, address, startDate },
+            source: 'tripartite_company_search',
+            sourceOrderNumber,
+          },
+        });
+      }
+
       if (req.method === 'GET' && pathname === '/api/admin/admin-users') {
         const auth = await resolveAdminFromRequest(req);
         if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });
@@ -1104,6 +1512,66 @@ async function main() {
         const [rows] = await state.pool.query('SELECT id, phone, created_at, last_login_at, is_superadmin, is_enabled, permission_scope FROM admin_user ORDER BY created_at DESC');
         const admins = Array.isArray(rows) ? rows.map((r) => getAdminPublic(r)) : [];
         return writeJson(req, res, 200, { success: true, admins });
+      }
+
+      if (req.method === 'POST' && pathname === '/api/admin/tripartite/call') {
+        const auth = await resolveAdminFromRequest(req);
+        if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });
+
+        const body = await readJson(req);
+        const servicePath = typeof body?.servicePath === 'string' ? body.servicePath.trim() : '';
+        const scene = typeof body?.scene === 'string' ? body.scene.trim() : '';
+        const requestId = typeof body?.requestId === 'string' && body.requestId.trim() ? body.requestId.trim() : uuidv4();
+        const timestamp = typeof body?.timestamp === 'number' && Number.isFinite(body.timestamp) ? Math.floor(body.timestamp) : Date.now();
+        const clientId = typeof body?.clientId === 'string' && body.clientId.trim() ? body.clientId.trim() : TRIPARTITE_CLIENT_ID;
+        const signType = typeof body?.signType === 'string' && body.signType.trim() ? body.signType.trim() : TRIPARTITE_SIGN_TYPE;
+
+        if (!TRIPARTITE_BASE_URL) return writeJson(req, res, 500, { success: false, code: 'CONFIG_MISSING', message: '缺少 TRIPARTITE_BASE_URL' });
+        if (!clientId) return writeJson(req, res, 400, { success: false, code: 'CLIENT_ID_REQUIRED', message: '缺少 clientId' });
+        if (!scene) return writeJson(req, res, 400, { success: false, code: 'SCENE_REQUIRED', message: '缺少 scene' });
+        if (!servicePath) return writeJson(req, res, 400, { success: false, code: 'SERVICE_PATH_REQUIRED', message: '缺少 servicePath' });
+        if (!isSafeServicePath(servicePath)) {
+          return writeJson(req, res, 400, { success: false, code: 'SERVICE_PATH_INVALID', message: 'servicePath 不合法' });
+        }
+
+        const dataValue = typeof body?.data === 'string' ? body.data : JSON.stringify(body?.data ?? {});
+
+        const privateKeyObject = normalizePkcs8PrivateKey(TRIPARTITE_RSA_PRIVATE_KEY_RAW);
+        if (!privateKeyObject) {
+          return writeJson(req, res, 500, { success: false, code: 'CONFIG_MISSING', message: '缺少 TRIPARTITE_RSA_PRIVATE_KEY（或 TRIPARTITE_RSA_PRIVATE_KEY_FILE）' });
+        }
+
+        const paramsForSign = {
+          clientId,
+          data: dataValue,
+          requestId,
+          scene,
+          signType,
+          timestamp,
+        };
+
+        const sortStr = buildSortedQueryString(paramsForSign);
+        const sign = rsaSha256SignBase64(sortStr, privateKeyObject);
+
+        const requestBody = { ...paramsForSign, sign };
+        const base = TRIPARTITE_BASE_URL.replace(/\/+$/, '');
+        const upstreamUrl = `${base}/${servicePath}`;
+
+        try {
+          const upstream = await httpRequestJson(upstreamUrl, requestBody, 12_000);
+          const statusCode = upstream.statusCode || 0;
+          if (statusCode >= 200 && statusCode < 300) {
+            return writeJson(req, res, 200, { success: true, upstream: { statusCode, data: upstream.data } });
+          }
+          return writeJson(req, res, 502, {
+            success: false,
+            code: 'UPSTREAM_ERROR',
+            message: '第三方接口调用失败',
+            upstream: { statusCode, data: upstream.data },
+          });
+        } catch (e) {
+          return writeJson(req, res, 502, { success: false, code: 'UPSTREAM_UNAVAILABLE', message: e?.message || 'upstream_unavailable' });
+        }
       }
 
       if (req.method === 'POST' && pathname === '/api/admin/admin-users/create') {

@@ -2,18 +2,6 @@ import '../from-zero-start/style.css';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
-import type { Action, AxureHandle, AxureProps, ConfigItem, DataDesc, EventItem, KeyDesc } from '../../common/axure-types';
-
-const EVENT_LIST: EventItem[] = [];
-
-const ACTION_LIST: Action[] = [];
-
-const VAR_LIST: KeyDesc[] = [];
-
-const CONFIG_LIST: ConfigItem[] = [];
-
-const DATA_LIST: DataDesc[] = [];
-
 type AdminProfile = {
   adminId: string;
   phone: string;
@@ -75,7 +63,7 @@ function mapAdminApiError(res: Response, json: any, fallback: string): string {
   return fallback;
 }
 
-const Component = React.forwardRef<AxureHandle, AxureProps>(function AdminLogin(innerProps, ref) {
+function App() {
   const [navId, setNavId] = useState<'customers' | 'products' | 'users' | 'admins'>('users');
   const [productsTabId, setProductsTabId] = useState<'services' | 'types'>('services');
   const [phone, setPhone] = useState<string>('');
@@ -114,12 +102,6 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function AdminLogin(
   const [createAdminBusy, setCreateAdminBusy] = useState<boolean>(false);
 
   const apiBaseUrl = useMemo(function () {
-    const configured = (innerProps?.config && typeof (innerProps.config as any).apiBaseUrl === 'string')
-      ? (innerProps.config as any).apiBaseUrl
-      : '';
-
-    if (configured) return configured.replace(/\/$/, '');
-
     const envApiBase = typeof import.meta !== 'undefined' && (import.meta as any).env
       ? ((import.meta as any).env.VITE_API_BASE_URL as string | undefined)
       : undefined;
@@ -132,7 +114,7 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function AdminLogin(
     }
 
     return '';
-  }, [innerProps?.config]);
+  }, []);
 
   const fetchJson = useCallback(async function (path: string, options?: RequestInit) {
     const normalizedBase = apiBaseUrl.replace(/\/$/, '');
@@ -610,22 +592,6 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function AdminLogin(
     void refreshPanel(navId);
   }, [admin, navId, refreshPanel]);
 
-  React.useImperativeHandle(ref, function () {
-    return {
-      getVar: function () {
-        return undefined;
-      },
-      fireAction: function () {
-        return undefined;
-      },
-      eventList: EVENT_LIST,
-      actionList: ACTION_LIST,
-      varList: VAR_LIST,
-      configList: CONFIG_LIST,
-      dataList: DATA_LIST,
-    };
-  }, []);
-
   if (admin) {
     const usersTotalPages = Math.max(1, Math.ceil(usersTotal / usersPageSize));
     const canUsersPrev = usersPage > 1;
@@ -1003,6 +969,14 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function AdminLogin(
       </div>
     </div>
   );
-});
+}
 
-export default Component;
+function mount() {
+  if (typeof window === 'undefined') return;
+  const bootstrap = (window as any).HtmlTemplateBootstrap;
+  if (bootstrap?.renderComponent) bootstrap.renderComponent(App);
+}
+
+mount();
+
+export default App;

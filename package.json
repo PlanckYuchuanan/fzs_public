@@ -11,7 +11,7 @@
     "dev:all": "node scripts/dev-all.mjs",
     "build": "node scripts/scan-entries.js && node scripts/build-all.js && node scripts/build-html-template-bootstrap-lite.mjs && node scripts/generate-dist-html.js",
     "preview": "vite preview",
-    "test": "vitest --run",
+    "test": "vitest --run --passWithNoTests",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "check-ready": "node scripts/check-app-ready.mjs",

@@ -5,23 +5,9 @@ import './style.css';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
-import type { Action, AxureHandle, AxureProps, ConfigItem, DataDesc, EventItem, KeyDesc } from '../../common/axure-types';
-
-const EVENT_LIST: EventItem[] = [
-  { name: 'onCreateCustomer', desc: '点击“新增客户”按钮时触发' },
-];
-
-const ACTION_LIST: Action[] = [];
-
-const VAR_LIST: KeyDesc[] = [];
-
-const CONFIG_LIST: ConfigItem[] = [];
-
-const DATA_LIST: DataDesc[] = [];
-
 const NAV_ITEMS: Array<{ id: string; label: string; desc: string }> = [
   { id: 'dashboard', label: '仪表盘', desc: '概览与关键指标（占位）' },
-  { id: 'customers', label: '客户管理', desc: '客户列表与跟进（占位）' },
+  { id: 'customers', label: '客户管理', desc: '搜索企业并添加客户（单选）' },
   { id: 'projects', label: '项目管理', desc: '项目与资源（占位）' },
   { id: 'orders', label: '制单管理', desc: '制单与流程（占位）' },
   { id: 'products', label: '产品服务', desc: '产品与服务（占位）' },
@@ -44,9 +30,35 @@ type ProductServiceTypePublicRow = {
   name: string;
 };
 
-const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroStart(innerProps, ref) {
-  const onEvent = typeof innerProps?.onEvent === 'function' ? innerProps.onEvent : function () {};
+type CompanySearchResultRow = {
+  keyNo: string;
+  name: string;
+  status: string;
+  creditCode: string;
+  regNo: string;
+  operName: string;
+  address: string;
+  startDate: string;
+};
 
+type OrdersPaging = {
+  pageSize: number;
+  pageIndex: number;
+  totalRecords: number;
+};
+
+type CustomerRow = {
+  customerId: string;
+  createdAt: string;
+  source: string;
+  sourceOrderNumber: string;
+  company: CompanySearchResultRow;
+  activeFollowupCount: number;
+  activeProjectCount: number;
+  signingProjectCount: number;
+};
+
+function App() {
   const [authTab, setAuthTab] = useState<'register' | 'login'>('register');
   const [phone, setPhone] = useState<string>('');
   const [password, setPassword] = useState<string>('');
@@ -60,13 +72,23 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
   const [productServicesBusy, setProductServicesBusy] = useState<boolean>(false);
   const [productServicesError, setProductServicesError] = useState<string>('');
 
+  const [companyNameInput, setCompanyNameInput] = useState<string>('');
+  const [companySearchBusy, setCompanySearchBusy] = useState<boolean>(false);
+  const [companySearchError, setCompanySearchError] = useState<string>('');
+  const [companySearchResults, setCompanySearchResults] = useState<CompanySearchResultRow[]>([]);
+  const [companySearchPaging, setCompanySearchPaging] = useState<OrdersPaging | null>(null);
+  const [companySearchOrderNumber, setCompanySearchOrderNumber] = useState<string>('');
+  const [companySelectedKeyNo, setCompanySelectedKeyNo] = useState<string>('');
+
+  const [customerRegisterOpen, setCustomerRegisterOpen] = useState<boolean>(false);
+
+  const [ordersBusy, setOrdersBusy] = useState<boolean>(false);
+  const [ordersError, setOrdersError] = useState<string>('');
+  const [orders, setOrders] = useState<CustomerRow[]>([]);
+  const [orderCreateBusy, setOrderCreateBusy] = useState<boolean>(false);
+  const [orderCreateError, setOrderCreateError] = useState<string>('');
+
   const apiBaseUrl = useMemo(function () {
-    const configured = (innerProps?.config && typeof (innerProps.config as any).apiBaseUrl === 'string')
-      ? (innerProps.config as any).apiBaseUrl
-      : '';
-
-    if (configured) return configured.replace(/\/$/, '');
-
     const envApiBase = typeof import.meta !== 'undefined' && (import.meta as any).env
       ? ((import.meta as any).env.VITE_API_BASE_URL as string | undefined)
       : undefined;
@@ -79,7 +101,7 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
     }
 
     return '';
-  }, [innerProps?.config]);
+  }, []);
 
   const fetchJson = useCallback(async function (path: string, options?: RequestInit) {
     const normalizedBase = apiBaseUrl.replace(/\/$/, '');
@@ -99,11 +121,118 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
     return { res, json };
   }, [apiBaseUrl]);
 
-  const handleCreateCustomer = useCallback(function () {
+  const loadOrders = useCallback(async function () {
+    if (!user) return;
+    setOrdersBusy(true);
+    setOrdersError('');
     try {
-      onEvent('onCreateCustomer', '{}');
-    } catch {}
-  }, [onEvent]);
+      const { res, json } = await fetchJson('/api/customers', { method: 'GET' });
+      if (!res.ok || !json?.success) {
+        setOrdersError(json?.message || '获取客户失败');
+        return;
+      }
+      const rows = Array.isArray(json.customers) ? json.customers : [];
+      const normalized = rows.map((c: any) => ({
+        customerId: c?.customerId || '',
+        createdAt: c?.createdAt || '',
+        company: c?.company || {},
+        activeFollowupCount: Number(c?.activeFollowupCount || 0),
+        activeProjectCount: Number(c?.activeProjectCount || 0),
+        signingProjectCount: Number(c?.signingProjectCount || 0),
+        source: c?.source || '',
+        sourceOrderNumber: c?.sourceOrderNumber || '',
+      }));
+      setOrders(normalized);
+    } catch (e: any) {
+      setOrdersError(e?.message || '网络错误');
+    } finally {
+      setOrdersBusy(false);
+    }
+  }, [fetchJson, user]);
+
+  const searchCompanies = useCallback(async function (pageIndex: number) {
+    if (!user) return;
+    const companyName = companyNameInput.trim();
+    if (!companyName) {
+      setCompanySearchError('请输入公司名称');
+      return;
+    }
+
+    setCompanySearchBusy(true);
+    setCompanySearchError('');
+    setCompanySearchResults([]);
+    setCompanySelectedKeyNo('');
+    setCompanySearchOrderNumber('');
+    try {
+      const { res, json } = await fetchJson('/api/company-search', {
+        method: 'POST',
+        body: JSON.stringify({ companyName, pageSize: 10, pageIndex }),
+      });
+      if (!res.ok || !json) {
+        setCompanySearchError('查询失败');
+        return;
+      }
+      if (!json.success) {
+        setCompanySearchError(json.message || '查询失败');
+        return;
+      }
+      setCompanySearchResults(Array.isArray(json.results) ? json.results : []);
+      setCompanySearchPaging(json.paging || null);
+      setCompanySearchOrderNumber(typeof json.orderNumber === 'string' ? json.orderNumber : '');
+    } catch (e: any) {
+      setCompanySearchError(e?.message || '网络错误');
+    } finally {
+      setCompanySearchBusy(false);
+    }
+  }, [companyNameInput, fetchJson, user]);
+
+  const openCustomerRegister = useCallback(function () {
+    setCompanySearchError('');
+    setOrderCreateError('');
+    setCompanySearchResults([]);
+    setCompanySearchPaging(null);
+    setCompanySelectedKeyNo('');
+    setCompanySearchOrderNumber('');
+    setCustomerRegisterOpen(true);
+  }, []);
+
+  const createOrder = useCallback(async function (company: CompanySearchResultRow) {
+    if (!user) return;
+
+    setOrderCreateBusy(true);
+    setOrderCreateError('');
+    try {
+      const { res, json } = await fetchJson('/api/customers/create', {
+        method: 'POST',
+        body: JSON.stringify({ orderNumber: companySearchOrderNumber, company }),
+      });
+      if (!res.ok || !json?.success) {
+        setOrderCreateError(json?.message || '添加失败');
+        return;
+      }
+
+      setCompanySelectedKeyNo('');
+      setCompanySearchResults([]);
+      setCompanySearchPaging(null);
+      setCompanySearchOrderNumber('');
+      setCompanyNameInput('');
+      setCustomerRegisterOpen(false);
+      await loadOrders();
+    } catch (e: any) {
+      setOrderCreateError(e?.message || '网络错误');
+    } finally {
+      setOrderCreateBusy(false);
+    }
+  }, [companySearchOrderNumber, fetchJson, loadOrders, user]);
+
+  const registerSelectedCompany = useCallback(function () {
+    const found = companySearchResults.find((r) => r.keyNo === companySelectedKeyNo);
+    if (!found) {
+      setOrderCreateError('请先选择一家企业');
+      return;
+    }
+    void createOrder(found);
+  }, [companySearchResults, companySelectedKeyNo, createOrder]);
 
   const loadMe = useCallback(async function () {
     try {
@@ -181,6 +310,12 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
     setUser(null);
   }, [fetchJson]);
 
+  useEffect(() => {
+    if (!user) return;
+    if (navId !== 'customers') return;
+    void loadOrders();
+  }, [loadOrders, navId, user]);
+
   const loadProductServices = useCallback(async function () {
     setProductServicesBusy(true);
     setProductServicesError('');
@@ -238,22 +373,6 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
     if (navId !== 'products') return;
     void loadProductServices();
   }, [loadProductServices, navId, user]);
-
-  React.useImperativeHandle(ref, function () {
-    return {
-      getVar: function () {
-        return undefined;
-      },
-      fireAction: function () {
-        return undefined;
-      },
-      eventList: EVENT_LIST,
-      actionList: ACTION_LIST,
-      varList: VAR_LIST,
-      configList: CONFIG_LIST,
-      dataList: DATA_LIST,
-    };
-  }, []);
 
   if (!user) {
     const goAdmin = () => {
@@ -368,11 +487,13 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
                 <div className="fzs-panel-title">{activeNav.label}</div>
                 <div className="fzs-panel-desc">{activeNav.desc}</div>
               </div>
-              {activeNav.id === 'customers' && (
-                <button className="fzs-primary-button dark" type="button" onClick={handleCreateCustomer}>
-                  新增客户
-                </button>
-              )}
+              <div className="fzs-panel-head-right">
+                {activeNav.id === 'customers' && (
+                  <button className="fzs-primary-button dark" type="button" onClick={openCustomerRegister}>
+                    客户登记
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="fzs-panel-body">
@@ -383,9 +504,185 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
                 </div>
               )}
               {activeNav.id === 'customers' && (
-                <div className="fzs-empty-block">
-                  <div className="fzs-empty-title">客户管理</div>
-                  <div className="fzs-empty-desc">客户数据将由你这边定义并接入。</div>
+                <div className="fzs-customer-root">
+                  <div className="fzs-customer-grid">
+                    <div className="fzs-customer-card main">
+                      {ordersError && <div className="fzs-error">{ordersError}</div>}
+                      {ordersBusy ? (
+                        <div className="fzs-empty-block">
+                          <div className="fzs-empty-title">加载中...</div>
+                          <div className="fzs-empty-desc">正在获取客户列表。</div>
+                        </div>
+                      ) : orders.length === 0 ? (
+                        <div className="fzs-empty-block">
+                          <div className="fzs-empty-title">暂无客户</div>
+                          <div className="fzs-empty-desc">点击右上角“客户登记”添加客户。</div>
+                        </div>
+                      ) : (
+                        <div className="fzs-customer-table">
+                          <div className="fzs-customer-table-row header">
+                            <div>企业名称</div>
+                            <div>状态</div>
+                            <div>统一社会信用代码</div>
+                            <div>法人</div>
+                            <div>进展</div>
+                            <div>成立日期</div>
+                            <div>地址</div>
+                          </div>
+                          {orders.map((c) => (
+                            <div key={c.customerId} className="fzs-customer-table-row">
+                              <div className="name">{c.company.name}</div>
+                              <div>{c.company.status || '-'}</div>
+                              <div>{c.company.creditCode || '-'}</div>
+                              <div>{c.company.operName || '-'}</div>
+                              <div className="fzs-customer-metrics">
+                                <button className={c.activeFollowupCount > 0 ? 'fzs-metric-button active' : 'fzs-metric-button'} type="button">
+                                  跟进 {c.activeFollowupCount}
+                                </button>
+                                <button className={c.activeProjectCount > 0 ? 'fzs-metric-button active' : 'fzs-metric-button'} type="button">
+                                  活跃 {c.activeProjectCount}
+                                </button>
+                                <button className={c.signingProjectCount > 0 ? 'fzs-metric-button active' : 'fzs-metric-button'} type="button">
+                                  签约中 {c.signingProjectCount}
+                                </button>
+                              </div>
+                              <div>{c.company.startDate || '-'}</div>
+                              <div className="addr">{c.company.address || '-'}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {customerRegisterOpen && (
+                    <div
+                      className="fzs-modal-mask"
+                      role="dialog"
+                      aria-modal="true"
+                      onMouseDown={(e) => {
+                        if (e.target === e.currentTarget) setCustomerRegisterOpen(false);
+                      }}
+                    >
+                      <div className="fzs-modal">
+                        <div className="fzs-modal-head">
+                          <div className="fzs-modal-title">客户登记</div>
+                          <button className="fzs-modal-close" type="button" onClick={() => setCustomerRegisterOpen(false)}>
+                            ×
+                          </button>
+                        </div>
+
+                        <div className="fzs-modal-body">
+                          <div className="fzs-order-row">
+                            <input
+                              className="fzs-input"
+                              value={companyNameInput}
+                              placeholder="输入公司名称（例如：重庆）"
+                              onChange={(e) => setCompanyNameInput(e.target.value)}
+                            />
+                            <button
+                              className="fzs-primary-button dark"
+                              type="button"
+                              disabled={companySearchBusy}
+                              onClick={() => searchCompanies(1)}
+                            >
+                              {companySearchBusy ? '查询中...' : '查询'}
+                            </button>
+                          </div>
+                          {companySearchError && <div className="fzs-error">{companySearchError}</div>}
+
+                          {companySearchBusy ? (
+                            <div className="fzs-empty-block">
+                              <div className="fzs-empty-title">加载中...</div>
+                              <div className="fzs-empty-desc">正在查询企业列表。</div>
+                            </div>
+                          ) : companySearchResults.length === 0 ? (
+                            <div className="fzs-empty-block">
+                              <div className="fzs-empty-title">暂无结果</div>
+                              <div className="fzs-empty-desc">输入公司名称后点击查询。</div>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="fzs-order-tip">请选择一家企业（单选），点击“提交”完成登记。</div>
+                              <div className="fzs-order-table">
+                                <div className="fzs-order-table-row header">
+                                  <div />
+                                  <div>企业名称</div>
+                                  <div>状态</div>
+                                  <div>统一社会信用代码</div>
+                                  <div>法人</div>
+                                  <div>成立日期</div>
+                                </div>
+                                {companySearchResults.map((r) => (
+                                  <div key={r.keyNo} className="fzs-order-table-row">
+                                    <div>
+                                      <input
+                                        type="radio"
+                                        name="companySelect"
+                                        checked={companySelectedKeyNo === r.keyNo}
+                                        onChange={() => setCompanySelectedKeyNo(r.keyNo)}
+                                      />
+                                    </div>
+                                    <div className="fzs-order-company-name">{r.name}</div>
+                                    <div>{r.status || '-'}</div>
+                                    <div>{r.creditCode || '-'}</div>
+                                    <div>{r.operName || '-'}</div>
+                                    <div>{r.startDate || '-'}</div>
+                                  </div>
+                                ))}
+                              </div>
+
+                              <div className="fzs-order-actions">
+                                <button
+                                  className="fzs-primary-button dark"
+                                  type="button"
+                                  disabled={!companySelectedKeyNo || orderCreateBusy}
+                                  onClick={registerSelectedCompany}
+                                >
+                                  {orderCreateBusy ? '提交中...' : '提交'}
+                                </button>
+                                <button
+                                  className="fzs-secondary-button"
+                                  type="button"
+                                  disabled={companySearchBusy || orderCreateBusy}
+                                  onClick={() => {
+                                    setCompanySelectedKeyNo('');
+                                    setCompanySelected(null);
+                                  }}
+                                >
+                                  清空选择
+                                </button>
+                                {companySearchPaging && (
+                                  <div className="fzs-order-paging">
+                                    <button
+                                      className="fzs-secondary-button"
+                                      type="button"
+                                      disabled={companySearchPaging.pageIndex <= 1 || companySearchBusy || orderCreateBusy}
+                                      onClick={() => searchCompanies(companySearchPaging.pageIndex - 1)}
+                                    >
+                                      上一页
+                                    </button>
+                                    <div className="fzs-order-page-text">
+                                      {companySearchPaging.pageIndex} / {Math.max(1, Math.ceil(companySearchPaging.totalRecords / Math.max(1, companySearchPaging.pageSize)))}
+                                    </div>
+                                    <button
+                                      className="fzs-secondary-button"
+                                      type="button"
+                                      disabled={companySearchPaging.pageIndex >= Math.ceil(companySearchPaging.totalRecords / Math.max(1, companySearchPaging.pageSize)) || companySearchBusy || orderCreateBusy}
+                                      onClick={() => searchCompanies(companySearchPaging.pageIndex + 1)}
+                                    >
+                                      下一页
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                              {orderCreateError && <div className="fzs-error">{orderCreateError}</div>}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
               {activeNav.id === 'projects' && (
@@ -471,6 +768,14 @@ const Component = React.forwardRef<AxureHandle, AxureProps>(function FromZeroSta
       </div>
     </div>
   );
-});
+}
 
-export default Component;
+function mount() {
+  if (typeof window === 'undefined') return;
+  const bootstrap = (window as any).HtmlTemplateBootstrap;
+  if (bootstrap?.renderComponent) bootstrap.renderComponent(App);
+}
+
+mount();
+
+export default App;

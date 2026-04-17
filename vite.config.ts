@@ -9,8 +9,6 @@ import archiver from 'archiver';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { forceInlineDynamicImportsOff } from './vite-plugins/forceInlineDynamicImportsOff';
-import { addAxhubMarker } from './vite-plugins/addAxhubMarker';
-import { axhubComponentEnforcer } from './vite-plugins/axhubComponentEnforcer';
 import { virtualHtmlPlugin } from './vite-plugins/virtualHtml';
 import { websocketPlugin } from './vite-plugins/websocketPlugin';
 import { injectStablePageIds } from './vite-plugins/injectStablePageIds';
@@ -29,7 +27,6 @@ const MAKE_STATE_DIR = path.join('.axhub', 'make');
 const MAKE_CONFIG_RELATIVE_PATH = path.join(MAKE_STATE_DIR, 'axhub.config.json');
 const MAKE_DEV_SERVER_INFO_RELATIVE_PATH = path.join(MAKE_STATE_DIR, '.dev-server-info.json');
 const MAKE_ENTRIES_RELATIVE_PATH = path.join(MAKE_STATE_DIR, 'entries.json');
-const AXURE_BRIDGE_BASE_URL = 'http://localhost:32767';
 
 /**
  * ⚠️ 运行时配置注入说明
@@ -129,59 +126,6 @@ function serializeErrorForLog(error: any) {
     stack: stack ? limitErrorText(stack, 1200) : undefined,
     causeStack: causeStack ? limitErrorText(causeStack, 1200) : undefined,
   };
-}
-
-function formatAxureProxyErrorDetails(error: any): string {
-  const parts: string[] = [];
-  const message = readErrorString(error?.message);
-  const causeMessage = readErrorString(error?.cause?.message);
-  const code = readErrorString(error?.code) || readErrorString(error?.cause?.code);
-  const errno = readErrorString(error?.errno) || readErrorString(error?.cause?.errno);
-  const syscall = readErrorString(error?.syscall) || readErrorString(error?.cause?.syscall);
-  const address = readErrorString(error?.address) || readErrorString(error?.cause?.address);
-  const port =
-    typeof error?.port === 'number'
-      ? String(error.port)
-      : typeof error?.cause?.port === 'number'
-        ? String(error.cause.port)
-        : '';
-
-  if (message) {
-    parts.push(message);
-  }
-  if (causeMessage && causeMessage !== message) {
-    parts.push(`cause=${causeMessage}`);
-  }
-  if (code) {
-    parts.push(`code=${code}`);
-  }
-  if (errno && errno !== code) {
-    parts.push(`errno=${errno}`);
-  }
-  if (syscall) {
-    parts.push(`syscall=${syscall}`);
-  }
-  if (address) {
-    parts.push(`address=${address}`);
-  }
-  if (port) {
-    parts.push(`port=${port}`);
-  }
-
-  return parts.join('; ') || 'Unknown upstream error';
-}
-
-function normalizeAxvgPayloadText(rawBody: string): string {
-  const source = rawBody.trim();
-  if (!source) {
-    return '// axvg\n{}';
-  }
-
-  if (source.startsWith('// axvg')) {
-    return source;
-  }
-
-  return `// axvg\n${source}`;
 }
 
 function isLoopbackOrPrivateHostname(hostname: string): boolean {
@@ -771,122 +715,6 @@ function downloadDistPlugin(): Plugin {
   };
 }
 
-// 提供 /api/axure-bridge/* 端点的插件（服务端转发到本地 Axure Bridge）
-function axureBridgeProxyPlugin(): Plugin {
-  return {
-    name: 'axure-bridge-proxy-plugin',
-    configureServer(server: any) {
-      server.middlewares.use(async (req: any, res: any, next: any) => {
-        const pathname = getRequestPathname(req);
-        const isAvailableRoute = req.method === 'GET' && pathname === '/api/axure-bridge/available';
-        const isCopyRoute = req.method === 'POST' && pathname === '/api/axure-bridge/copyaxvg';
-
-        if (!isAvailableRoute && !isCopyRoute) {
-          return next();
-        }
-
-        const upstreamUrl = isAvailableRoute
-          ? `${AXURE_BRIDGE_BASE_URL}/available`
-          : `${AXURE_BRIDGE_BASE_URL}/copyaxvg`;
-        let payloadBytes = 0;
-
-        try {
-          let upstreamResponse: any;
-
-          if (isAvailableRoute) {
-            upstreamResponse = await fetch(upstreamUrl, {
-              method: 'GET',
-            });
-          } else {
-            let rawBody = '';
-            try {
-              rawBody = await readRequestBody(req);
-            } catch (error: any) {
-              res.statusCode = 400;
-              res.setHeader('Content-Type', 'application/json; charset=utf-8');
-              res.end(JSON.stringify({ error: error?.message || 'Invalid request body' }));
-              return;
-            }
-
-            const requestBody = normalizeAxvgPayloadText(rawBody);
-            const requestBuffer = Buffer.from(requestBody, 'utf8');
-            payloadBytes = requestBuffer.byteLength;
-
-            upstreamResponse = await fetch(upstreamUrl, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'text/plain; charset=utf-8',
-                'Content-Length': String(payloadBytes),
-              },
-              body: requestBuffer,
-            });
-          }
-
-          const contentType = String(upstreamResponse.headers.get('content-type') || '').toLowerCase();
-          const responseText = await upstreamResponse.text();
-
-          if (!upstreamResponse.ok) {
-            console.warn('[axure-bridge-proxy] upstream responded with error', {
-              route: pathname,
-              method: req.method,
-              upstreamUrl,
-              payloadBytes: payloadBytes || undefined,
-              status: upstreamResponse.status,
-              statusText: upstreamResponse.statusText,
-              bodyPreview: limitErrorText(readErrorString(responseText), 800) || undefined,
-            });
-          }
-
-          res.statusCode = upstreamResponse.status;
-          res.setHeader('Cache-Control', 'no-store');
-
-          if (contentType.includes('application/json')) {
-            res.setHeader('Content-Type', 'application/json; charset=utf-8');
-            res.end(responseText || '{}');
-            return;
-          }
-
-          if (responseText) {
-            try {
-              const parsed = JSON.parse(responseText);
-              res.setHeader('Content-Type', 'application/json; charset=utf-8');
-              res.end(JSON.stringify(parsed));
-              return;
-            } catch {
-              // 非 JSON 文本按原样透传
-            }
-          }
-
-          res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-          res.end(responseText);
-        } catch (error: any) {
-          const errorLog = serializeErrorForLog(error);
-          console.error('[axure-bridge-proxy] upstream request failed', {
-            route: pathname,
-            method: req.method,
-            upstreamUrl,
-            payloadBytes: payloadBytes || undefined,
-            error: errorLog,
-          });
-
-          res.statusCode = 502;
-          res.setHeader('Content-Type', 'application/json; charset=utf-8');
-          res.end(JSON.stringify({
-            error: error?.message || 'Axure Bridge unavailable',
-            details: formatAxureProxyErrorDetails(error),
-            code: errorLog.code || errorLog.causeCode || undefined,
-            causeMessage: errorLog.causeMessage || undefined,
-            route: pathname,
-            method: req.method,
-            bridgeUrl: upstreamUrl,
-            payloadBytes: payloadBytes || undefined,
-          }));
-        }
-      });
-    }
-  };
-}
-
 // 提供 /api/version 端点的插件
 function versionApiPlugin(): Plugin {
   return {
@@ -914,17 +742,6 @@ function versionApiPlugin(): Plugin {
       });
     }
   };
-}
-
-function readRequestBody(req: any): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    req.on('data', (chunk: Buffer | string) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-    req.on('end', () => {
-      resolve(Buffer.concat(chunks).toString('utf8'));
-    });
-    req.on('error', reject);
-  });
 }
 
 function sanitizeDocBaseName(input: string) {
@@ -3550,7 +3367,6 @@ const config: any = {
     lanAccessControlPlugin(), // 局域网访问控制（必须在最前面）
     writeDevServerInfoPlugin(), // 写入开发服务器信息
     serveAdminPlugin(), // 服务 admin 目录（需要在最前面）
-    axureBridgeProxyPlugin(), // 提供 /api/axure-bridge/* 端点
     exportImageProxyPlugin(), // 提供 /api/export/image-proxy 端点
     injectStablePageIds(), // 注入稳定 ID（所有模式都启用）
     virtualHtmlPlugin(),
@@ -3582,48 +3398,13 @@ const config: any = {
         babel: { configFile: false, babelrc: false }
       })
       : null,
-    isIifeBuild ? addAxhubMarker() : null,
-    isIifeBuild ? axhubComponentEnforcer(jsEntries[entryKey as string]) : null
   ].filter(Boolean) as Plugin[],
 
   root: 'src',
 
-  optimizeDeps: {
-    exclude: ['react', 'react-dom']
-  },
-
   resolve: {
     alias: [
       { find: '@', replacement: path.resolve(__dirname, './src') },
-      // spec-template 需要真正的 React，不使用 shim
-      !isIifeBuild && {
-        find: /^react$/,
-        replacement: (id: string, importer?: string) => {
-          // 如果是从 spec-template 导入，使用真正的 React
-          if (importer && importer.includes('/spec-template/')) {
-            return 'react';
-          }
-          return path.resolve(__dirname, 'src/common/react-shim.js');
-        }
-      },
-      !isIifeBuild && {
-        find: /^react-dom$/,
-        replacement: (id: string, importer?: string) => {
-          // 如果是从 spec-template 导入，使用真正的 React DOM
-          if (importer && importer.includes('/spec-template/')) {
-            return 'react-dom';
-          }
-          return path.resolve(__dirname, 'src/common/react-dom-shim.js');
-        }
-      },
-      !isIifeBuild && {
-        find: /^react\/.*/,
-        replacement: path.resolve(__dirname, 'src/common/react-shim.js')
-      },
-      !isIifeBuild && {
-        find: /^react-dom\/.*/,
-        replacement: path.resolve(__dirname, 'src/common/react-dom-shim.js')
-      }
     ].filter(Boolean) as { find: string | RegExp; replacement: string | ((id: string, importer?: string) => string) }[]
   },
 

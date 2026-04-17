@@ -1,3 +1,7 @@
+这是项目FZS的文档；
+端：管理端；
+共享：同一 MySQL+同一后端 server/index.mjs；路由前缀：/api vs /api/admin
+
 # 管理员登录
 
 ## 页面目标
@@ -55,6 +59,49 @@
   - `PHONE_REQUIRED`：手机号不能为空
   - `PHONE_INVALID`：手机号格式不正确（中国大陆 11 位）
   - `PASSWORD_REQUIRED`：密码不能为空
+
+## 第三方接口（Tripartite）
+
+### 对接信息
+
+- 测试地址：`http://tr.yeyeku.com/gs_tripartite_web/openapi/service/<servicePath>`
+- 请求类型：`POST`
+- Content-Type：`application/json;charset=utf-8`
+- 公共参数（body）：
+  - `clientId`：客户端 id（string）
+  - `requestId`：请求ID（string，不可重复，推荐 uuid）
+  - `scene`：场景（string，业务方自定义）
+  - `timestamp`：时间戳（long）
+  - `signType`：默认 `RSA2`
+  - `sign`：签名（string，Base64）
+  - `data`：json 字符串（string，具体字段见各 service 的文档）
+
+### 签名规则（RSA2）
+
+- 将参数按参数名称升序排序，拼成 `key=value&key=value` 得到 `sortStr`
+- 使用开发者中心的 RSA 私钥对 `sortStr` 做 `SHA256WithRSA` 签名，结果 Base64 作为 `sign`
+
+### 本项目调用方式（服务端代理）
+
+- 管理端调用接口：`POST /api/admin/tripartite/call`
+- body：
+  - `servicePath`：第三方 service 路径（如 `xxx/yyy`）
+  - `scene`：场景
+  - `data`：对象或字符串；对象会在服务端 `JSON.stringify` 后参与签名并透传
+  - `requestId` / `timestamp` / `clientId` / `signType`：可选；不传则由服务端生成或读取配置
+- 返回：
+  - 成功：`{ success: true, upstream: { statusCode, data } }`
+  - 失败：`{ success: false, code, message, upstream? }`
+
+### 配置项（环境变量）
+
+- `TRIPARTITE_BASE_URL`：第三方 base url（默认 `http://tr.yeyeku.com/gs_tripartite_web/openapi/service`）
+- `TRIPARTITE_CLIENT_ID`：第三方 clientId
+- `TRIPARTITE_SIGN_TYPE`：默认 `RSA2`
+- `TRIPARTITE_RSA_PRIVATE_KEY`：开发者 RSA 私钥（PKCS8，支持 PEM 或 base64）
+- `TRIPARTITE_RSA_PRIVATE_KEY_FILE`：开发者 RSA 私钥文件路径（优先级低于 `TRIPARTITE_RSA_PRIVATE_KEY`）
+- `TRIPARTITE_PLATFORM_PUBLIC_KEY`：平台公钥（base64，预留用于验签）
+- `TRIPARTITE_PLATFORM_PUBLIC_KEY_FILE`：平台公钥文件路径（优先级低于 `TRIPARTITE_PLATFORM_PUBLIC_KEY`）
 
 ## 数据库
 

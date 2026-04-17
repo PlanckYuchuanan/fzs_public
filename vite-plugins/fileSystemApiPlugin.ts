@@ -113,11 +113,8 @@ function moveFileWithFallback(srcPath: string, destPath: string) {
 }
 
 const SUPPORTED_UPLOAD_TARGET_TYPES = ['prototypes', 'components', 'themes'] as const;
-const THEME_IMPORT_SUPPORTED_UPLOAD_TYPES = new Set(['local_axure', 'v0', 'google_aistudio']);
+const THEME_IMPORT_SUPPORTED_UPLOAD_TYPES = new Set(['v0', 'google_aistudio']);
 const THEME_IMPORT_SUB_SKILL_DOCS = [
-  '/skills/axure-prototype-workflow/theme-generation.md',
-  '/skills/axure-prototype-workflow/doc-generation.md',
-  '/skills/axure-prototype-workflow/data-generation.md',
   '/skills/web-page-workflow/theme-generation.md',
   '/skills/web-page-workflow/doc-generation.md',
   '/skills/web-page-workflow/data-generation.md',
@@ -1076,7 +1073,7 @@ export function fileSystemApiPlugin(): Plugin {
               const targetType = getFieldValue(fields.targetType);
               const uploadMode = getFieldValue(fields.uploadMode);
               const folderNameField = getFieldValue(fields.folderName);
-              const targetTypeRequired = uploadType !== 'local_axure';
+              const targetTypeRequired = true;
               
               const normalizeFiles = (value: any) => {
                 if (!value) return [];
@@ -1170,58 +1167,6 @@ export function fileSystemApiPlugin(): Plugin {
 
               const relativePaths = normalizeFiles(fields.relativePaths).map((value: any) => String(value));
               const derivedRootName = deriveRootFolderName(relativePaths);
-
-              // AI 辅助类型：local_axure（解压到 temp 并返回 Prompt）
-              if (uploadType === 'local_axure') {
-                if (isFolderUpload) {
-                  return sendJSON(res, 400, { error: 'local_axure 暂不支持文件夹上传，请使用 ZIP 文件' });
-                }
-                try {
-                  const scriptPath = path.join(projectRoot, 'scripts', 'local-axure-extract.mjs');
-                  const commandResult = runCommandSync({
-                    command: 'node',
-                    args: [scriptPath, tempFilePath, originalFilename],
-                    cwd: projectRoot,
-                  });
-
-                  if (commandResult.status !== 0) {
-                    const details = [commandResult.stderr, commandResult.stdout]
-                      .filter(Boolean)
-                      .join('\n')
-                      .trim();
-                    throw new Error(details || 'local-axure-extract failed');
-                  }
-
-                  const rawOutput = commandResult.stdout.trim();
-
-                  const lastLine = rawOutput.split('\n').filter(Boolean).slice(-1)[0] || rawOutput;
-                  const extracted = JSON.parse(lastLine) as { extractDir: string; contentDir?: string };
-                  const filePath = extracted.contentDir || extracted.extractDir;
-
-                  // 清理临时 zip
-                  fs.unlinkSync(tempFilePath);
-
-                  const isThemeImport = targetType === 'themes';
-                  const skillDocs = isThemeImport
-                    ? ['/skills/local-axure-workflow/SKILL.md', ...THEME_IMPORT_SUB_SKILL_DOCS]
-                    : ['/skills/local-axure-workflow/SKILL.md'];
-                  const targetHint = targetType ? `\n\n建议输出目录：\`src/${targetType}\`` : '';
-                  const prompt = isThemeImport
-                    ? `本地 Axure ZIP 已上传并解压完成。\n\n解压目录：\`${filePath}\`\n\n请阅读技能文档：\n${formatReferenceList(skillDocs)}\n\n目标：导入主题并生成主题/文档/数据相关资产。\n\n建议输出目录：\n- \`src/themes/<theme-key>/\`\n- \`src/docs/\`\n- \`assets/database/\`\n\n开始执行前：先根据 skill 的用户交互指南用简短中文回复用户，确认需求（主题范围/是否需要文档与数据/是否允许优化）。\n\n请按技能文档流程，从解压目录中提取并生成主题 token、设计规范、项目文档与数据模型。`
-                    : `本地 Axure ZIP 已上传并解压完成。\n\n解压目录：\`${filePath}\`\n\n请阅读技能文档：\n${formatReferenceList(skillDocs)}${targetHint}\n\n开始执行前：先根据 skill 的用户交互指南用简短中文回复用户，确认需求（目标范围/输出类型/是否允许优化等）。\n\n请按技能文档流程，从解压目录中提取主题/数据/文档并还原页面/元素。`;
-
-                  return sendJSON(res, 200, {
-                    success: true,
-                    uploadType,
-                    filePath,
-                    prompt,
-                    message: '文件已解压，请复制 Prompt 交给 AI 处理'
-                  });
-                } catch (e: any) {
-                  console.error('[文件系统 API] local_axure 解压失败:', e);
-                  return sendJSON(res, 500, { error: `解压失败: ${e.message}` });
-                }
-              }
 
               let folderUploadContext: {
                 tempExtractDir: string;

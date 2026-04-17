@@ -160,7 +160,7 @@
   }
   
   // 依赖检查
-  function checkDependencies() {
+  function checkDependencies(silent) {
     const requiredGlobals = {
       'React': window.React,
       'ReactDOM': window.ReactDOM,
@@ -175,7 +175,9 @@
     });
     
     if (missing.length > 0) {
-      console.error('%c[Auto Debug] 缺少必需的全局变量:', 'color: #ff4d4f; font-weight: bold;', missing);
+      if (!silent) {
+        console.error('%c[Auto Debug] 缺少必需的全局变量:', 'color: #ff4d4f; font-weight: bold;', missing);
+      }
       return false;
     }
     
@@ -189,35 +191,48 @@
     
     console.log('%c[Auto Debug] 自动调试工具已启用', 'color: #1890ff; font-weight: bold;');
     
-    // 检查依赖
-    checkDependencies();
-    
-    // 监控性能
-    monitorPerformance();
-    
-    // 监控组件渲染
-    monitorComponentRender();
-    
-    // 延迟检测白屏
-    setTimeout(checkWhiteScreen, AUTO_DEBUG_CONFIG.whiteScreenTimeout);
-    
-    // 集成错误捕获系统
-    if (window.__ERROR_SYSTEM__) {
-      const originalAddError = window.__ERROR_SYSTEM__.addError;
-      window.__ERROR_SYSTEM__.addError = function(message, stack) {
-        // 调用原始方法
-        if (originalAddError) {
-          originalAddError.call(this, message, stack);
-        }
-        
-        // 上报错误
-        reportError({
-          message: message,
-          stack: stack,
-          type: 'manual'
-        });
-      };
+    function startAfterDependencies() {
+      monitorPerformance();
+      monitorComponentRender();
+      setTimeout(checkWhiteScreen, AUTO_DEBUG_CONFIG.whiteScreenTimeout);
+
+      if (window.__ERROR_SYSTEM__) {
+        const originalAddError = window.__ERROR_SYSTEM__.addError;
+        window.__ERROR_SYSTEM__.addError = function(message, stack) {
+          if (originalAddError) {
+            originalAddError.call(this, message, stack);
+          }
+
+          reportError({
+            message: message,
+            stack: stack,
+            type: 'manual'
+          });
+        };
+      }
     }
+
+    if (checkDependencies(true)) {
+      startAfterDependencies();
+      return;
+    }
+
+    let attempts = 0;
+    const maxAttempts = Math.ceil((AUTO_DEBUG_CONFIG.whiteScreenTimeout || 3000) / 100);
+    const timer = setInterval(function() {
+      attempts++;
+      if (checkDependencies(true)) {
+        clearInterval(timer);
+        console.log('%c[Auto Debug] 依赖延迟就绪 ✓', 'color: #52c41a;');
+        startAfterDependencies();
+        return;
+      }
+      if (attempts >= maxAttempts) {
+        clearInterval(timer);
+        console.warn('%c[Auto Debug] 依赖未在预期时间内就绪，继续运行（可能出现误报）', 'color: #faad14; font-weight: bold;');
+        startAfterDependencies();
+      }
+    }, 100);
   }
   
   // 暴露 API

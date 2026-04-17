@@ -86,20 +86,6 @@
 
         window.React = bootstrap.React;
         window.ReactDOM = bootstrap.ReactDOM;
-
-        var resolvedComponent = null;
-        window.__AXHUB_DEFINE_COMPONENT__ = function (Component) {
-          resolvedComponent = Component;
-        };
-
-        window.__AXHUB_RENDER_COMPONENT__ = function () {
-          if (!resolvedComponent) return false;
-          try {
-            delete window.__AXHUB_DEFINE_COMPONENT__;
-          } catch {}
-          bootstrap.renderComponent(resolvedComponent);
-          return true;
-        };
       }
 
       init();
@@ -107,16 +93,6 @@
   </script>
 
   <script src="{{ENTRY}}"></script>
-
-  <script>
-    (function () {
-      function render() {
-        if (window.__AXHUB_RENDER_COMPONENT__ && window.__AXHUB_RENDER_COMPONENT__()) return;
-        setTimeout(render, 10);
-      }
-      render();
-    })();
-  </script>
 
 </body>
 

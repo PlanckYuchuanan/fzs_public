@@ -338,16 +338,22 @@
 
   <div id="root"></div>
 
-  <!-- 加载自动调试客户端 -->
-  <script src="/auto-debug-client.js"></script>
-
-  <!-- 加载 bootstrap JS（会自动挂载到 window.DevTemplateBootstrap） -->
-  <script type="module" src="/assets/dev-template-bootstrap.js"></script>
+  <script>
+    (function () {
+      const s = document.createElement('script');
+      s.src = `/auto-debug-client.js?v=${Date.now()}`;
+      document.head.appendChild(s);
+    })();
+  </script>
 
   <script type="module">
-    // 等待 bootstrap 加载完成
-    function waitForBootstrap() {
-      if (window.DevTemplateBootstrap) {
+    import('/assets/dev-template-bootstrap.js').then(() => {
+      function waitForBootstrap() {
+        if (!window.DevTemplateBootstrap) {
+          setTimeout(waitForBootstrap, 10);
+          return;
+        }
+
         const { renderComponent, React, ReactDOM } = window.DevTemplateBootstrap;
 
         // 将 React 和 ReactDOM 挂载到全局，让组件使用同一个实例
@@ -457,12 +463,23 @@
             `;
           }
         });
-      } else {
-        setTimeout(waitForBootstrap, 10);
       }
-    }
 
-    waitForBootstrap();
+      waitForBootstrap();
+    }).catch((err) => {
+      console.error('[Dev Template] Bootstrap 加载失败:', err);
+      const root = document.getElementById('root');
+      if (root) {
+        root.innerHTML = `
+          <div style="padding: 40px; max-width: 800px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+            <div style="background: #fff1f0; border: 1px solid #ffccc7; border-radius: 8px; padding: 24px;">
+              <h2 style="margin: 0 0 12px 0; color: #cf1322; font-size: 20px; font-weight: 600;">Bootstrap 加载失败</h2>
+              <pre style="margin: 0; padding: 12px; background: #f5f5f5; border-radius: 6px; font-size: 12px; white-space: pre-wrap; word-break: break-word;">${String(err && (err.stack || err.message) || err)}</pre>
+            </div>
+          </div>
+        `;
+      }
+    });
   </script>
 
 </body>
