@@ -1723,6 +1723,106 @@ async function main() {
         return writeJson(req, res, 200, { success: true });
       }
 
+      if (req.method === 'POST' && pathname === '/api/wx/auth/login') {
+        const ok = await ensureDbReady();
+        if (!ok) return writeJson(req, res, 503, { success: false, code: 'DB_UNAVAILABLE', message: '数据库不可用' });
+
+        const body = await readJson(req);
+        const phone = normalizePhone(body.phone);
+        const password = body.password;
+
+        if (!phone) return writeJson(req, res, 400, { success: false, code: 'PHONE_REQUIRED', message: '手机号不能为空' });
+        if (!validateChinaMainlandMobile(phone)) {
+          return writeJson(req, res, 400, { success: false, code: 'PHONE_INVALID', message: '手机号格式不正确（中国大陆 11 位）' });
+        }
+        if (!password) {
+          return writeJson(req, res, 400, { success: false, code: 'PASSWORD_REQUIRED', message: '密码不能为空' });
+        }
+
+        const [rows] = await state.pool.query('SELECT id, phone, password_salt, password_hash, created_at FROM users WHERE phone = ? LIMIT 1', [phone]);
+        const user = Array.isArray(rows) && rows.length ? rows[0] : null;
+        if (!user) {
+          return writeJson(req, res, 401, { success: false, code: 'INVALID_CREDENTIALS', message: '手机号或密码错误' });
+        }
+
+        const hash = pbkdf2Hash(password, user.password_salt);
+        if (hash !== user.password_hash) {
+          return writeJson(req, res, 401, { success: false, code: 'INVALID_CREDENTIALS', message: '手机号或密码错误' });
+        }
+
+        const accessToken = await signAccessToken({ user_id: user.id, username: user.phone, scope: 'wxapp' });
+        const refreshToken = crypto.randomBytes(32).toString('base64url');
+        const refreshTokenHash = sha256Hex(refreshToken);
+        const nowIso = new Date().toISOString();
+        const expiresIso = new Date(Date.now() + REFRESH_TOKEN_TTL_SEC * 1000).toISOString();
+        const refreshId = uuidv4();
+        const ip = typeof req?.socket?.remoteAddress === 'string' ? req?.socket?.remoteAddress : null;
+        const userAgent = typeof req?.headers?.['user-agent'] === 'string' ? req.headers['user-agent'].slice(0, 255) : null;
+
+        await state.pool.query(
+          'INSERT INTO refresh_tokens (id, user_id, token_hash, device_id, created_at, expires_at, revoked_at, replaced_by, ip, user_agent) VALUES (?,?,?,?,?,?,?,?,?,?)',
+          [refreshId, user.id, refreshTokenHash, 'wxapp', nowIso, expiresIso, null, null, ip, userAgent],
+        );
+
+        return writeJson(req, res, 200, { success: true, accessToken, refreshToken, user: { userId: user.id, phone: user.phone } });
+      }
+
+      if (req.method === 'POST' && pathname === '/api/wx/auth/refresh') {
+        const cookies = parseCookies(req);
+        const rawRefresh = typeof cookies[REFRESH_COOKIE_NAME] === 'string' ? cookies[REFRESH_COOKIE_NAME] : '';
+        if (!rawRefresh) return writeJson(req, res, 401, { success: false, code: 'REFRESH_TOKEN_MISSING', message: '请先登录' });
+
+        const tokenHash = sha256Hex(rawRefresh);
+        const [rows] = await state.pool.query(
+          'SELECT rt.id, rt.user_id, rt.expires_at, rt.revoked_at, u.phone, u.created_at FROM refresh_tokens rt JOIN users u ON u.id = rt.user_id WHERE rt.token_hash = ? LIMIT 1',
+          [tokenHash],
+        );
+        const record = Array.isArray(rows) && rows.length ? rows[0] : null;
+        if (!record) return writeJson(req, res, 401, { success: false, code: 'REFRESH_TOKEN_INVALID', message: '登录已过期，请重新登录' });
+        if (record.revoked_at) return writeJson(req, res, 401, { success: false, code: 'REFRESH_TOKEN_REVOKED', message: '登录已过期，请重新登录' });
+        if (new Date(record.expires_at) < new Date()) return writeJson(req, res, 401, { success: false, code: 'REFRESH_TOKEN_EXPIRED', message: '登录已过期，请重新登录' });
+
+        const newAccessToken = await signAccessToken({ user_id: record.user_id, username: record.phone, scope: 'wxapp' });
+        return writeJson(req, res, 200, { success: true, accessToken: newAccessToken });
+      }
+
+      if (req.method === 'GET' && pathname.startsWith('/api/wx/')) {
+        const auth = await resolveUserFromRequest(req);
+        if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });
+      }
+
+      if (req.method === 'GET' && pathname === '/api/wx/customers') {
+        const auth = await resolveUserFromRequest(req);
+        if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });
+
+        const [rows] = await state.pool.query(
+          `SELECT id, company_key_no, company_name, company_status, credit_code, reg_no, oper_name, address, start_date,
+                  active_followup_count, active_project_count, signing_project_count, source, source_order_number, created_at
+           FROM customers WHERE user_id = ? ORDER BY created_at DESC LIMIT 100`,
+          [auth.user.id],
+        );
+        const customers = (rows || []).map((r) => ({
+          customerId: r.id,
+          company: {
+            keyNo: r.company_key_no,
+            name: r.company_name,
+            status: r.company_status,
+            creditCode: r.credit_code,
+            regNo: r.reg_no,
+            operName: r.oper_name,
+            address: r.address,
+            startDate: r.start_date,
+          },
+          activeFollowupCount: r.active_followup_count,
+          activeProjectCount: r.active_project_count,
+          signingProjectCount: r.signing_project_count,
+          source: r.source,
+          sourceOrderNumber: r.source_order_number,
+          createdAt: r.created_at,
+        }));
+        return writeJson(req, res, 200, { success: true, customers });
+      }
+
       if (req.method === 'POST' && pathname === '/api/admin/admin-users/permission') {
         const auth = await resolveAdminFromRequest(req);
         if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });

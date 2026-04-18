@@ -1,0 +1,6 @@
+<view class="container">
+  <view class="card">
+    <text class="title">客户管理</text>
+    <text class="desc">页面内容待定义</text>
+  </view>
+</view>

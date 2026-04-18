@@ -1,0 +1,47 @@
+{
+  "pages": [
+    "pages/index/index",
+    "pages/customer/index",
+    "pages/tools/index",
+    "pages/mine/index"
+  ],
+  "window": {
+    "navigationBarTitleText": "工作助手",
+    "navigationBarBackgroundColor": "#FAF5FF",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#FAF5FF"
+  },
+  "tabBar": {
+    "color": "#64748B",
+    "selectedColor": "#7C3AED",
+    "backgroundColor": "#FFFFFF",
+    "borderStyle": "black",
+    "list": [
+      {
+        "pagePath": "pages/index/index",
+        "text": "首页",
+        "iconPath": "static/tabbar/home.png",
+        "selectedIconPath": "static/tabbar/home-active.png"
+      },
+      {
+        "pagePath": "pages/customer/index",
+        "text": "客户",
+        "iconPath": "static/tabbar/customer.png",
+        "selectedIconPath": "static/tabbar/customer-active.png"
+      },
+      {
+        "pagePath": "pages/tools/index",
+        "text": "工具",
+        "iconPath": "static/tabbar/tools.png",
+        "selectedIconPath": "static/tabbar/tools-active.png"
+      },
+      {
+        "pagePath": "pages/mine/index",
+        "text": "我的",
+        "iconPath": "static/tabbar/mine.png",
+        "selectedIconPath": "static/tabbar/mine-active.png"
+      }
+    ]
+  },
+  "sitemapLocation": "sitemap.json"
+}

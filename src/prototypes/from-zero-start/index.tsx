@@ -604,7 +604,7 @@ function App() {
                               <div>状态</div>
                               <div>统一社会信用代码</div>
                               <div>法人</div>
-                              <div>进展</div>
+                              <div>活跃进展信息</div>
                               <div>成立日期</div>
                               <div>地址</div>
                               <div>操作</div>
@@ -617,13 +617,13 @@ function App() {
                                 <div>{c.company.operName || '-'}</div>
                                 <div className="fzs-customer-metrics">
                                   <button className={c.activeFollowupCount > 0 ? 'fzs-metric-button active' : 'fzs-metric-button'} type="button">
-                                    跟进 {c.activeFollowupCount}
-                                  </button>
-                                  <button className={c.activeProjectCount > 0 ? 'fzs-metric-button active' : 'fzs-metric-button'} type="button">
-                                    活跃 {c.activeProjectCount}
+                                    跟进数 {c.activeFollowupCount}
                                   </button>
                                   <button className={c.signingProjectCount > 0 ? 'fzs-metric-button active' : 'fzs-metric-button'} type="button">
-                                    签约中 {c.signingProjectCount}
+                                    签约数 {c.signingProjectCount}
+                                  </button>
+                                  <button className={c.activeProjectCount > 0 ? 'fzs-metric-button active' : 'fzs-metric-button'} type="button">
+                                    项目数 {c.activeProjectCount}
                                   </button>
                                 </div>
                                 <div>{c.company.startDate || '-'}</div>

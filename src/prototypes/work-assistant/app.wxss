@@ -1,0 +1,23 @@
+/* 工作助手小程序全局样式 */
+
+page {
+  background-color: #FAF5FF;
+  font-family: "PingFang SC", "Helvetica Neue", Helvetica, Arial, "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  color: #1E1B4B;
+  line-height: 1.5;
+}
+
+.container {
+  min-height: 100vh;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.card {
+  background: #FFFFFF;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 12px;
+  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.08);
+}
