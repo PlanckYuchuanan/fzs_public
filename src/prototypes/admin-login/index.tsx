@@ -39,11 +39,12 @@ type ProductServiceRow = {
   createdAt: string;
 };
 
-const ADMIN_NAV_ITEMS: Array<{ id: 'customers' | 'products' | 'users' | 'admins'; label: string; desc: string }> = [
+const ADMIN_NAV_ITEMS: Array<{ id: 'customers' | 'products' | 'users' | 'admins' | 'settings'; label: string; desc: string }> = [
   { id: 'customers', label: '客户管理', desc: '客户与线索（待定义）' },
   { id: 'products', label: '产品和服务管理', desc: '产品、服务与配置（待定义）' },
   { id: 'users', label: '用户管理', desc: '管理 user 表账号状态' },
   { id: 'admins', label: '管理员', desc: '管理 admin_user 状态与权限' },
+  { id: 'settings', label: '系统设置', desc: '平台级配置项' },
 ];
 
 function mapAdminLoginError(res: Response, json: any): string {
@@ -64,7 +65,7 @@ function mapAdminApiError(res: Response, json: any, fallback: string): string {
 }
 
 function App() {
-  const [navId, setNavId] = useState<'customers' | 'products' | 'users' | 'admins'>('users');
+  const [navId, setNavId] = useState<'customers' | 'products' | 'users' | 'admins' | 'settings'>('users');
   const [productsTabId, setProductsTabId] = useState<'services' | 'types'>('services');
   const [phone, setPhone] = useState<string>('');
   const [password, setPassword] = useState<string>('');
@@ -100,6 +101,7 @@ function App() {
   const [createAdminPhone, setCreateAdminPhone] = useState<string>('');
   const [createAdminPassword, setCreateAdminPassword] = useState<string>('');
   const [createAdminBusy, setCreateAdminBusy] = useState<boolean>(false);
+  const [userRegistrationEnabled, setUserRegistrationEnabled] = useState<boolean>(true);
 
   const apiBaseUrl = useMemo(function () {
     const envApiBase = typeof import.meta !== 'undefined' && (import.meta as any).env
@@ -237,13 +239,41 @@ function App() {
     throw new Error(mapAdminApiError(res, json, '加载产品服务失败'));
   }, [fetchJson]);
 
-  const refreshPanel = useCallback(async function (target: 'customers' | 'products' | 'users' | 'admins') {
+  const loadPlatformSettings = useCallback(async function () {
+    const { res, json } = await fetchJson('/api/admin/platform-settings', { method: 'GET' });
+    if (res.ok && json?.success) {
+      setUserRegistrationEnabled(!!json?.settings?.userRegistrationEnabled);
+      return;
+    }
+    throw new Error(mapAdminApiError(res, json, '加载系统设置失败'));
+  }, [fetchJson]);
+
+  const updatePlatformSettings = useCallback(async function (nextEnabled: boolean) {
+    if (!admin?.isSuperadmin) return;
+    setPanelBusy(true);
+    setError('');
+    try {
+      const { res, json } = await fetchJson('/api/admin/platform-settings', {
+        method: 'POST',
+        body: JSON.stringify({ userRegistrationEnabled: nextEnabled }),
+      });
+      if (!res.ok || !json?.success) throw new Error(mapAdminApiError(res, json, '保存失败'));
+      setUserRegistrationEnabled(!!json?.settings?.userRegistrationEnabled);
+    } catch (e: any) {
+      setError(e?.message || '保存失败');
+    } finally {
+      setPanelBusy(false);
+    }
+  }, [admin?.isSuperadmin, fetchJson]);
+
+  const refreshPanel = useCallback(async function (target: 'customers' | 'products' | 'users' | 'admins' | 'settings') {
     if (!admin) return;
     setPanelBusy(true);
     setError('');
     try {
       if (target === 'users') await loadUsers(usersPage, usersPageSize);
       if (target === 'admins') await loadAdmins();
+      if (target === 'settings') await loadPlatformSettings();
       if (target === 'products' && productsTabId === 'types') await loadProductServiceTypes();
       if (target === 'products' && productsTabId === 'services') {
         await Promise.all([loadProductServices(), loadProductServiceTypes()]);
@@ -253,7 +283,7 @@ function App() {
     } finally {
       setPanelBusy(false);
     }
-  }, [admin, loadAdmins, loadProductServiceTypes, loadProductServices, loadUsers, productsTabId, usersPage, usersPageSize]);
+  }, [admin, loadAdmins, loadPlatformSettings, loadProductServiceTypes, loadProductServices, loadUsers, productsTabId, usersPage, usersPageSize]);
 
   const goUsersPage = useCallback(async function (nextPage: number) {
     if (!admin) return;
@@ -691,6 +721,28 @@ function App() {
                   <div className="fzs-empty-block">
                     <div className="fzs-empty-title">客户管理</div>
                     <div className="fzs-empty-desc">内容区域待你定义接入。</div>
+                  </div>
+                )}
+
+                {navId === 'settings' && (
+                  <div className="fzs-admin-settings">
+                    <div className="fzs-admin-setting-row">
+                      <div className="fzs-admin-setting-label">用户端是否开放注册</div>
+                      <div className="fzs-admin-setting-control">
+                        <label className="fzs-admin-switch">
+                          <input
+                            type="checkbox"
+                            checked={userRegistrationEnabled}
+                            disabled={panelBusy || !admin.isSuperadmin}
+                            onChange={(e) => void updatePlatformSettings(e.target.checked)}
+                          />
+                          <span className="fzs-admin-switch-text">{userRegistrationEnabled ? '已开启' : '已关闭'}</span>
+                        </label>
+                      </div>
+                    </div>
+                    {!admin.isSuperadmin && (
+                      <div className="fzs-admin-setting-hint">仅超管可修改系统设置</div>
+                    )}
                   </div>
                 )}
 

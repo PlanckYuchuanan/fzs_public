@@ -23,10 +23,12 @@
       - 子菜单 TAB：产品服务 / 产品服务类型（内容待定义）
     - 用户管理
     - 管理员
+    - 系统设置
   - 右侧主内容
     - 顶部：当前管理员信息、退出、返回用户登录
     - 用户管理：展示 `users` 列表，支持启用/停用（停用后不可登录）
     - 管理员：展示 `admin_user` 列表，支持启用/停用、权限范围设置、超管标记切换
+    - 系统设置：配置“用户端是否开放注册”
 
 ## 交互说明
 
@@ -41,6 +43,8 @@
   - `POST /api/admin/admin-users/create`（仅超管，新增管理员：phone/password）
   - `POST /api/admin/admin-users/status`
   - `POST /api/admin/admin-users/permission`
+  - `GET /api/admin/platform-settings`（读取平台配置）
+  - `POST /api/admin/platform-settings`（仅超管，更新平台配置）
   - 用户分页：`GET /api/admin/users?page=1&pageSize=20` → `users/page/pageSize/total`
   - 产品服务类型管理：
     - `GET /api/admin/product-service-types`
@@ -117,6 +121,12 @@
 
 - 用户表：`users`
   - 新增：`is_enabled`（是否启用，停用后不可登录）
+
+- 平台配置表：`platform_settings`
+  - `setting_key`：配置键（主键）
+  - `setting_value`：配置值（string，布尔用 `true/false`）
+  - `updated_at`：更新时间
+  - `updated_by_admin_id`：更新人管理员ID（可空）
 
 - 产品服务类型表：`product_service_types`
   - `id`：类型ID

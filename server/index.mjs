@@ -45,7 +45,7 @@ const DB_USER = process.env.DB_USER || 'root';
 const DB_PASSWORD = process.env.DB_PASSWORD || '';
 const DB_NAME = process.env.DB_NAME || 'from_zero_start';
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-jwt-secret-change-me';
-const ACCESS_TOKEN_TTL_SEC = Number(process.env.ACCESS_TOKEN_TTL_SEC || 15 * 60);
+const ACCESS_TOKEN_TTL_SEC = Number(process.env.ACCESS_TOKEN_TTL_SEC || 60 * 60);
 const REFRESH_TOKEN_TTL_SEC = Number(process.env.REFRESH_TOKEN_TTL_SEC || 7 * 24 * 60 * 60);
 const COOKIE_SECURE = String(process.env.COOKIE_SECURE || '').toLowerCase() === 'true';
 const TRIPARTITE_BASE_URL = process.env.TRIPARTITE_BASE_URL || 'http://tr.yeyeku.com/gs_tripartite_web/openapi/service';
@@ -579,6 +579,19 @@ async function ensureDbReady() {
       ORDER BY created_at DESC
     `).catch(() => {});
 
+    await state.pool.query(`
+      CREATE TABLE IF NOT EXISTS platform_settings (
+        setting_key VARCHAR(64) PRIMARY KEY,
+        setting_value TEXT NOT NULL,
+        updated_at VARCHAR(32) NOT NULL,
+        updated_by_admin_id VARCHAR(36) NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+    await state.pool.query(
+      'INSERT IGNORE INTO platform_settings (setting_key, setting_value, updated_at, updated_by_admin_id) VALUES (?,?,?,?)',
+      ['user_registration_enabled', 'true', new Date().toISOString(), null],
+    ).catch(() => {});
+
     state.dbReady = true;
     state.dbReadyMessage = '';
     return true;
@@ -587,6 +600,37 @@ async function ensureDbReady() {
     state.dbReadyMessage = e?.message || 'db_init_failed';
     return false;
   }
+}
+
+async function getPlatformSettingString(settingKey) {
+  const ok = await ensureDbReady();
+  if (!ok) return '';
+  const [rows] = await state.pool.query('SELECT setting_value FROM platform_settings WHERE setting_key = ? LIMIT 1', [settingKey]);
+  const row = Array.isArray(rows) && rows.length ? rows[0] : null;
+  return typeof row?.setting_value === 'string' ? row.setting_value : '';
+}
+
+async function getPlatformSettingBool(settingKey, fallback) {
+  try {
+    const raw = await getPlatformSettingString(settingKey);
+    if (!raw) return fallback;
+    if (raw === 'true') return true;
+    if (raw === 'false') return false;
+    return fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+async function setPlatformSettingBool(settingKey, value, updatedByAdminId) {
+  const ok = await ensureDbReady();
+  if (!ok) return false;
+  const nowIso = new Date().toISOString();
+  await state.pool.query(
+    'INSERT INTO platform_settings (setting_key, setting_value, updated_at, updated_by_admin_id) VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = VALUES(updated_at), updated_by_admin_id = VALUES(updated_by_admin_id)',
+    [settingKey, value ? 'true' : 'false', nowIso, updatedByAdminId || null],
+  );
+  return true;
 }
 
 async function resolveAdminFromRequest(req) {
@@ -664,9 +708,23 @@ async function main() {
         return writeJson(req, res, 200, { ok: true, db: ok ? 'ok' : 'unavailable', dbMessage: ok ? '' : state.dbReadyMessage });
       }
 
+      if (req.method === 'GET' && pathname === '/api/public/settings') {
+        const enabled = await getPlatformSettingBool('user_registration_enabled', true);
+        return writeJson(req, res, 200, { success: true, userRegistrationEnabled: enabled });
+      }
+
       if (req.method === 'POST' && pathname === '/api/auth/register') {
         const ok = await ensureDbReady();
         if (!ok) return writeJson(req, res, 503, { success: false, code: 'DB_UNAVAILABLE', message: '数据库不可用' });
+
+        const registrationEnabled = await getPlatformSettingBool('user_registration_enabled', true);
+        if (!registrationEnabled) {
+          return writeJson(req, res, 403, {
+            success: false,
+            code: 'REGISTRATION_DISABLED',
+            message: '系统暂未开放注册，请联系管理员获取自己的账号',
+          });
+        }
 
         const body = await readJson(req);
         const phone = normalizePhone(body.phone);
@@ -1409,6 +1467,15 @@ async function main() {
         const auth = await resolveUserFromRequest(req);
         if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });
 
+        const pageRaw = url.searchParams.get('page') || '1';
+        const pageSizeRaw = url.searchParams.get('pageSize') || '20';
+        const page = Math.max(1, Number.parseInt(pageRaw, 10) || 1);
+        const pageSize = Math.min(50, Math.max(1, Number.parseInt(pageSizeRaw, 10) || 20));
+        const offset = (page - 1) * pageSize;
+
+        const [countRows] = await state.pool.query('SELECT COUNT(*) AS total FROM customers WHERE user_id = ?', [auth.user.id]);
+        const total = Number(Array.isArray(countRows) && countRows.length ? countRows[0]?.total : 0) || 0;
+
         const [rows] = await state.pool.query(
           `SELECT id, user_id, company_key_no, company_name, company_status, credit_code, reg_no, oper_name, address, start_date,
            active_followup_count, active_project_count, signing_project_count,
@@ -1416,8 +1483,8 @@ async function main() {
            FROM customers
            WHERE user_id = ?
            ORDER BY created_at DESC
-           LIMIT 100`,
-          [auth.user.id],
+           LIMIT ? OFFSET ?`,
+          [auth.user.id, pageSize, offset],
         );
         const customers = Array.isArray(rows)
           ? rows.map((r) => ({
@@ -1440,7 +1507,16 @@ async function main() {
             sourceOrderNumber: r.source_order_number || '',
           }))
           : [];
-        return writeJson(req, res, 200, { success: true, customers });
+        return writeJson(req, res, 200, {
+          success: true,
+          customers,
+          paging: {
+            page,
+            pageSize,
+            total,
+            totalPages: Math.max(1, Math.ceil(total / Math.max(1, pageSize))),
+          },
+        });
       }
 
       if (req.method === 'POST' && pathname === '/api/customers/create') {
@@ -1512,6 +1588,25 @@ async function main() {
         const [rows] = await state.pool.query('SELECT id, phone, created_at, last_login_at, is_superadmin, is_enabled, permission_scope FROM admin_user ORDER BY created_at DESC');
         const admins = Array.isArray(rows) ? rows.map((r) => getAdminPublic(r)) : [];
         return writeJson(req, res, 200, { success: true, admins });
+      }
+
+      if (req.method === 'GET' && pathname === '/api/admin/platform-settings') {
+        const auth = await resolveAdminFromRequest(req);
+        if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });
+
+        const enabled = await getPlatformSettingBool('user_registration_enabled', true);
+        return writeJson(req, res, 200, { success: true, settings: { userRegistrationEnabled: enabled } });
+      }
+
+      if (req.method === 'POST' && pathname === '/api/admin/platform-settings') {
+        const auth = await resolveAdminFromRequest(req);
+        if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });
+        if (!auth.admin?.is_superadmin) return writeJson(req, res, 403, { success: false, code: 'FORBIDDEN', message: '仅超管可修改系统设置' });
+
+        const body = await readJson(req);
+        const nextEnabled = !!body?.userRegistrationEnabled;
+        await setPlatformSettingBool('user_registration_enabled', nextEnabled, auth.admin.adminId);
+        return writeJson(req, res, 200, { success: true, settings: { userRegistrationEnabled: nextEnabled } });
       }
 
       if (req.method === 'POST' && pathname === '/api/admin/tripartite/call') {

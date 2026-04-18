@@ -619,6 +619,10 @@
   border: 1px solid rgba(148, 163, 184, 0.22);
   transition: transform 120ms ease, filter 120ms ease;
 }
+.fzs-secondary-button.active {
+  background: rgba(105, 255, 248, 0.12);
+  border-color: rgba(105, 255, 248, 0.28);
+}
 .fzs-secondary-button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
@@ -1110,7 +1114,7 @@
 }
 .fzs-customer-table-row {
   display: grid;
-  grid-template-columns: 1.6fr 64px 1.1fr 0.85fr 260px 110px 2.3fr;
+  grid-template-columns: 1.45fr 64px 1.05fr 0.8fr 260px 110px 2.1fr 110px;
   gap: 10px;
   padding: 10px 12px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.12);
@@ -1158,6 +1162,38 @@
 .fzs-metric-button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+.fzs-customer-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.fzs-customer-footer {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.fzs-customer-footer .fzs-secondary-button {
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 999px;
+}
+.fzs-customer-page-size {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.fzs-customer-paging {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.fzs-customer-page-text {
+  font-size: 12px;
+  color: rgba(226, 232, 240, 0.78);
+  font-weight: 800;
 }
 
 .fzs-modal-mask {
@@ -1212,4 +1248,70 @@
 }
 .fzs-modal-body {
   padding: 14px;
+}
+
+.fzs-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%);
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(2, 6, 23, 0.72);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 13px;
+  font-weight: 800;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.5);
+  z-index: 80;
+  max-width: min(520px, calc(100vw - 48px));
+  text-align: center;
+}
+
+.fzs-admin-settings {
+  width: 100%;
+  display: grid;
+  gap: 12px;
+}
+.fzs-admin-setting-row {
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 14px;
+  padding: 14px;
+  background: rgba(2, 6, 23, 0.14);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.fzs-admin-setting-label {
+  font-size: 13px;
+  font-weight: 900;
+  color: rgba(255, 255, 255, 0.92);
+}
+.fzs-admin-setting-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.fzs-admin-setting-hint {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(226, 232, 240, 0.76);
+}
+.fzs-admin-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  font-weight: 900;
+  color: rgba(226, 232, 240, 0.86);
+}
+.fzs-admin-switch input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  accent-color: rgba(105, 255, 248, 0.8);
+}
+.fzs-admin-switch-text {
+  min-width: 44px;
+  text-align: right;
 }

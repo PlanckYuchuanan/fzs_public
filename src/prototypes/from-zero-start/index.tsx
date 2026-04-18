@@ -59,12 +59,14 @@ type CustomerRow = {
 };
 
 function App() {
-  const [authTab, setAuthTab] = useState<'register' | 'login'>('register');
+  const [authTab, setAuthTab] = useState<'register' | 'login'>('login');
   const [phone, setPhone] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [authError, setAuthError] = useState<string>('');
   const [user, setUser] = useState<{ userId: string; phone: string; registeredAt: string } | null>(null);
   const [authBusy, setAuthBusy] = useState<boolean>(false);
+  const [userRegistrationEnabled, setUserRegistrationEnabled] = useState<boolean>(true);
+  const [toastMessage, setToastMessage] = useState<string>('');
   const [navId, setNavId] = useState<string>('dashboard');
   const [productServices, setProductServices] = useState<ProductServicePublicRow[]>([]);
   const [productServiceTypes, setProductServiceTypes] = useState<ProductServiceTypePublicRow[]>([]);
@@ -85,6 +87,9 @@ function App() {
   const [ordersBusy, setOrdersBusy] = useState<boolean>(false);
   const [ordersError, setOrdersError] = useState<string>('');
   const [orders, setOrders] = useState<CustomerRow[]>([]);
+  const [customersPage, setCustomersPage] = useState<number>(1);
+  const [customersPageSize, setCustomersPageSize] = useState<number>(20);
+  const [customersTotal, setCustomersTotal] = useState<number>(0);
   const [orderCreateBusy, setOrderCreateBusy] = useState<boolean>(false);
   const [orderCreateError, setOrderCreateError] = useState<string>('');
 
@@ -142,12 +147,17 @@ function App() {
     return { res, json };
   }, [apiBaseUrl]);
 
-  const loadOrders = useCallback(async function () {
+  const customersTotalPages = useMemo(function () {
+    return Math.max(1, Math.ceil(customersTotal / Math.max(1, customersPageSize)));
+  }, [customersPageSize, customersTotal]);
+
+  const loadOrders = useCallback(async function (targetPage?: number) {
     if (!user) return;
+    const page = Math.max(1, targetPage || customersPage);
     setOrdersBusy(true);
     setOrdersError('');
     try {
-      const { res, json } = await fetchJson('/api/customers', { method: 'GET' });
+      const { res, json } = await fetchJson(`/api/customers?page=${page}&pageSize=${customersPageSize}`, { method: 'GET' });
       if (!res.ok || !json?.success) {
         setOrdersError(json?.message || '获取客户失败');
         return;
@@ -164,12 +174,26 @@ function App() {
         sourceOrderNumber: c?.sourceOrderNumber || '',
       }));
       setOrders(normalized);
+      setCustomersTotal(Number(json?.paging?.total || 0));
+      setCustomersPage(Number(json?.paging?.page || page));
     } catch (e: any) {
       setOrdersError(e?.message || '网络错误');
     } finally {
       setOrdersBusy(false);
     }
-  }, [fetchJson, user]);
+  }, [customersPage, customersPageSize, fetchJson, user]);
+
+  const goCustomersPage = useCallback(async function (nextPage: number) {
+    const safePage = Math.min(Math.max(1, nextPage), customersTotalPages);
+    setCustomersPage(safePage);
+    await loadOrders(safePage);
+  }, [customersTotalPages, loadOrders]);
+
+  const changeCustomersPageSize = useCallback(async function (nextSize: number) {
+    setCustomersPageSize(nextSize);
+    setCustomersPage(1);
+    await loadOrders(1);
+  }, [loadOrders]);
 
   const searchCompanies = useCallback(async function (pageIndex: number) {
     if (!user) return;
@@ -238,7 +262,8 @@ function App() {
       setCompanySearchOrderNumber('');
       setCompanyNameInput('');
       setCustomerRegisterOpen(false);
-      await loadOrders();
+      setCustomersPage(1);
+      await loadOrders(1);
     } catch (e: any) {
       setOrderCreateError(e?.message || '网络错误');
     } finally {
@@ -286,6 +311,11 @@ function App() {
     }
 
     if (authTab === 'register') {
+      if (!userRegistrationEnabled) {
+        setToastMessage('系统暂未开放注册，请联系管理员获取自己的账号');
+        window.setTimeout(() => setToastMessage(''), 2400);
+        return;
+      }
       if (!/^1[3-9]\d{9}$/.test(trimmedPhone)) {
         setAuthError('手机号格式不正确（中国大陆 11 位）');
         return;
@@ -324,6 +354,17 @@ function App() {
     }
   }, [authTab, fetchJson, password, phone]);
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const { res, json } = await fetchJson('/api/public/settings', { method: 'GET' });
+        if (res.ok && json?.success) {
+          setUserRegistrationEnabled(!!json.userRegistrationEnabled);
+        }
+      } catch {}
+    })();
+  }, [fetchJson]);
+
   const logout = useCallback(async function () {
     try {
       await fetchJson('/api/auth/logout', { method: 'POST', body: '{}' });
@@ -334,8 +375,8 @@ function App() {
   useEffect(() => {
     if (!user) return;
     if (navId !== 'customers') return;
-    void loadOrders();
-  }, [loadOrders, navId, user]);
+    void loadOrders(customersPage);
+  }, [customersPage, loadOrders, navId, user]);
 
   const loadProductServices = useCallback(async function () {
     setProductServicesBusy(true);
@@ -420,7 +461,21 @@ function App() {
             <button className={authTab === 'login' ? 'active' : ''} type="button" onClick={() => { setAuthTab('login'); setAuthError(''); }}>
               登录
             </button>
-            <button className={authTab === 'register' ? 'active' : ''} type="button" onClick={() => { setAuthTab('register'); setAuthError(''); }}>
+            <button
+              className={authTab === 'register' ? 'active' : ''}
+              type="button"
+              onClick={() => {
+                if (!userRegistrationEnabled) {
+                  setToastMessage('系统暂未开放注册，请联系管理员获取自己的账号');
+                  window.setTimeout(() => setToastMessage(''), 2400);
+                  setAuthTab('login');
+                  setAuthError('');
+                  return;
+                }
+                setAuthTab('register');
+                setAuthError('');
+              }}
+            >
               注册
             </button>
           </div>
@@ -447,6 +502,8 @@ function App() {
             <button className="fzs-admin-entry" type="button" onClick={goAdmin}>管理员入口</button>
           </div>
         </div>
+
+        {toastMessage && <div className="fzs-toast">{toastMessage}</div>}
       </div>
     );
   }
@@ -540,38 +597,97 @@ function App() {
                           <div className="fzs-empty-desc">点击右上角“客户登记”添加客户。</div>
                         </div>
                       ) : (
-                        <div className="fzs-customer-table">
-                          <div className="fzs-customer-table-row header">
-                            <div>企业名称</div>
-                            <div>状态</div>
-                            <div>统一社会信用代码</div>
-                            <div>法人</div>
-                            <div>进展</div>
-                            <div>成立日期</div>
-                            <div>地址</div>
-                          </div>
-                          {orders.map((c) => (
-                            <div key={c.customerId} className="fzs-customer-table-row">
-                              <div className="name">{c.company.name}</div>
-                              <div>{c.company.status || '-'}</div>
-                              <div>{c.company.creditCode || '-'}</div>
-                              <div>{c.company.operName || '-'}</div>
-                              <div className="fzs-customer-metrics">
-                                <button className={c.activeFollowupCount > 0 ? 'fzs-metric-button active' : 'fzs-metric-button'} type="button">
-                                  跟进 {c.activeFollowupCount}
-                                </button>
-                                <button className={c.activeProjectCount > 0 ? 'fzs-metric-button active' : 'fzs-metric-button'} type="button">
-                                  活跃 {c.activeProjectCount}
-                                </button>
-                                <button className={c.signingProjectCount > 0 ? 'fzs-metric-button active' : 'fzs-metric-button'} type="button">
-                                  签约中 {c.signingProjectCount}
-                                </button>
-                              </div>
-                              <div>{c.company.startDate || '-'}</div>
-                              <div className="addr">{c.company.address || '-'}</div>
+                        <>
+                          <div className="fzs-customer-table">
+                            <div className="fzs-customer-table-row header">
+                              <div>企业名称</div>
+                              <div>状态</div>
+                              <div>统一社会信用代码</div>
+                              <div>法人</div>
+                              <div>进展</div>
+                              <div>成立日期</div>
+                              <div>地址</div>
+                              <div>操作</div>
                             </div>
-                          ))}
-                        </div>
+                            {orders.map((c) => (
+                              <div key={c.customerId} className="fzs-customer-table-row">
+                                <div className="name">{c.company.name}</div>
+                                <div>{c.company.status || '-'}</div>
+                                <div>{c.company.creditCode || '-'}</div>
+                                <div>{c.company.operName || '-'}</div>
+                                <div className="fzs-customer-metrics">
+                                  <button className={c.activeFollowupCount > 0 ? 'fzs-metric-button active' : 'fzs-metric-button'} type="button">
+                                    跟进 {c.activeFollowupCount}
+                                  </button>
+                                  <button className={c.activeProjectCount > 0 ? 'fzs-metric-button active' : 'fzs-metric-button'} type="button">
+                                    活跃 {c.activeProjectCount}
+                                  </button>
+                                  <button className={c.signingProjectCount > 0 ? 'fzs-metric-button active' : 'fzs-metric-button'} type="button">
+                                    签约中 {c.signingProjectCount}
+                                  </button>
+                                </div>
+                                <div>{c.company.startDate || '-'}</div>
+                                <div className="addr">{c.company.address || '-'}</div>
+                                <div className="fzs-customer-actions">
+                                  <button className="fzs-secondary-button" type="button">
+                                    查看详情
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+
+                          <div className="fzs-customer-footer">
+                            <div className="fzs-customer-page-size">
+                              <button
+                                className={customersPageSize === 10 ? 'fzs-secondary-button active' : 'fzs-secondary-button'}
+                                type="button"
+                                disabled={ordersBusy}
+                                onClick={() => void changeCustomersPageSize(10)}
+                              >
+                                10/页
+                              </button>
+                              <button
+                                className={customersPageSize === 20 ? 'fzs-secondary-button active' : 'fzs-secondary-button'}
+                                type="button"
+                                disabled={ordersBusy}
+                                onClick={() => void changeCustomersPageSize(20)}
+                              >
+                                20/页
+                              </button>
+                              <button
+                                className={customersPageSize === 50 ? 'fzs-secondary-button active' : 'fzs-secondary-button'}
+                                type="button"
+                                disabled={ordersBusy}
+                                onClick={() => void changeCustomersPageSize(50)}
+                              >
+                                50/页
+                              </button>
+                            </div>
+
+                            <div className="fzs-customer-paging">
+                              <button
+                                className="fzs-secondary-button"
+                                type="button"
+                                disabled={ordersBusy || customersPage <= 1}
+                                onClick={() => void goCustomersPage(customersPage - 1)}
+                              >
+                                上一页
+                              </button>
+                              <div className="fzs-customer-page-text">
+                                {customersPage} / {customersTotalPages}（共 {customersTotal} 条）
+                              </div>
+                              <button
+                                className="fzs-secondary-button"
+                                type="button"
+                                disabled={ordersBusy || customersPage >= customersTotalPages}
+                                onClick={() => void goCustomersPage(customersPage + 1)}
+                              >
+                                下一页
+                              </button>
+                            </div>
+                          </div>
+                        </>
                       )}
                     </div>
                   </div>
@@ -668,7 +784,6 @@ function App() {
                                   disabled={companySearchBusy || orderCreateBusy}
                                   onClick={() => {
                                     setCompanySelectedKeyNo('');
-                                    setCompanySelected(null);
                                   }}
                                 >
                                   清空选择

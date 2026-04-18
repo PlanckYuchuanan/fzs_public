@@ -26,6 +26,7 @@
   - 手机号校验：符合中国大陆手机号规则（11 位，`^1[3-9]\\d{9}$`）
   - 密码至少 6 位，任意字符（纯数字也可）
   - 重复手机号提示“已注册”
+  - 若平台关闭注册：点击“注册”提示“系统暂未开放注册，请联系管理员获取自己的账号”
 - 登录：手机号 + 密码校验通过即登录成功
 - 登录态失效：任意接口返回 401 时尝试 `refresh` 并重试一次；失败则返回登录页
 - 退出登录：调用 `/api/auth/logout`，并返回登录页
@@ -34,7 +35,8 @@
   - 菜单项约 7 个占位，后续可扩展
   - “客户管理”页：
     - 主体为客户列表（尽量展示完整企业信息，隐藏内部 id/创建时间等辅助字段）
-    - 右侧为操作区，提供“客户登记”按钮
+    - 客户列表支持分页（page/pageSize，默认 20/页）
+    - 顶部提供“客户登记”按钮
     - 客户登记弹窗：
       - 顶部为第三方查询输入框（按公司名称查询企业列表）
       - 查询结果仅允许单选一条企业信息
@@ -152,7 +154,8 @@
 
 - `GET /api/customers`
   - 说明：获取当前用户已添加客户列表（仅返回当前用户自己的数据）
-  - 成功：`{ success: true, customers: Array<{ customerId, createdAt, source, sourceOrderNumber, company: { keyNo, name, status, creditCode, regNo, operName, address, startDate } }> }`
+  - query：`?page=1&pageSize=20`
+  - 成功：`{ success: true, customers: Array<{ customerId, createdAt, source, sourceOrderNumber, activeFollowupCount, activeProjectCount, signingProjectCount, company: { keyNo, name, status, creditCode, regNo, operName, address, startDate } }>, paging: { page, pageSize, total, totalPages } }`
 
 - `POST /api/customers/create`
   - 说明：添加客户（仅持久化用户最终选择的一条企业信息；暂按企业名称去重）
