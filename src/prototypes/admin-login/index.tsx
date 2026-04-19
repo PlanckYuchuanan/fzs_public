@@ -19,6 +19,26 @@ type UserRow = {
   isEnabled: boolean;
 };
 
+type CompanySearchResultRow = {
+  keyNo: string;
+  name: string;
+  status: string;
+  creditCode: string;
+  operName: string;
+  startDate: string;
+  address: string;
+};
+
+type AdminCustomerRow = {
+  customerId: string;
+  createdAt: string;
+  company: CompanySearchResultRow;
+  activeFollowupCount: number;
+  activeProjectCount: number;
+  signingProjectCount: number;
+  isDeleted: boolean;
+};
+
 type ProductServiceTypeRow = {
   typeId: string;
   name: string;
@@ -76,6 +96,10 @@ function App() {
   const [usersPage, setUsersPage] = useState<number>(1);
   const [usersPageSize, setUsersPageSize] = useState<number>(20);
   const [usersTotal, setUsersTotal] = useState<number>(0);
+  const [customers, setCustomers] = useState<AdminCustomerRow[]>([]);
+  const [customersPage, setCustomersPage] = useState<number>(1);
+  const [customersPageSize, setCustomersPageSize] = useState<number>(20);
+  const [customersTotal, setCustomersTotal] = useState<number>(0);
   const [admins, setAdmins] = useState<AdminProfile[]>([]);
   const [productServiceTypes, setProductServiceTypes] = useState<ProductServiceTypeRow[]>([]);
   const [productServices, setProductServices] = useState<ProductServiceRow[]>([]);
@@ -154,7 +178,9 @@ function App() {
         }
         setAdmin(null);
       }
-    } catch {}
+    } catch {
+      // 网络错误时不清理管理员状态，避免页面闪动
+    }
   }, [fetchJson]);
 
   const submit = useCallback(async function () {
@@ -211,6 +237,28 @@ function App() {
     }
     throw new Error(mapAdminApiError(res, json, '加载用户失败'));
   }, [fetchJson]);
+
+  const loadCustomers = useCallback(async function (page: number, pageSize: number) {
+    const qp = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+    const { res, json } = await fetchJson(`/api/admin/customers?${qp.toString()}`, { method: 'GET' });
+    if (res.ok && json?.success && Array.isArray(json.customers)) {
+      setCustomers(json.customers);
+      setCustomersPage(typeof json?.page === 'number' ? json.page : page);
+      setCustomersPageSize(typeof json?.pageSize === 'number' ? json.pageSize : pageSize);
+      setCustomersTotal(typeof json?.total === 'number' ? json.total : 0);
+      return;
+    }
+    throw new Error(mapAdminApiError(res, json, '加载客户失败'));
+  }, [fetchJson]);
+
+  const softDeleteCustomer = useCallback(async function (customerId: string) {
+    const { res, json } = await fetchJson('/api/admin/customers/soft-delete', {
+      method: 'POST',
+      body: JSON.stringify({ customerId }),
+    });
+    if (!res.ok || !json?.success) throw new Error(mapAdminApiError(res, json, '删除失败'));
+    await loadCustomers(customersPage, customersPageSize);
+  }, [customersPage, customersPageSize, fetchJson, loadCustomers]);
 
   const loadAdmins = useCallback(async function () {
     const { res, json } = await fetchJson('/api/admin/admin-users', { method: 'GET' });
@@ -271,6 +319,7 @@ function App() {
     setPanelBusy(true);
     setError('');
     try {
+      if (target === 'customers') await loadCustomers(customersPage, customersPageSize);
       if (target === 'users') await loadUsers(usersPage, usersPageSize);
       if (target === 'admins') await loadAdmins();
       if (target === 'settings') await loadPlatformSettings();
@@ -283,7 +332,7 @@ function App() {
     } finally {
       setPanelBusy(false);
     }
-  }, [admin, loadAdmins, loadPlatformSettings, loadProductServiceTypes, loadProductServices, loadUsers, productsTabId, usersPage, usersPageSize]);
+  }, [admin, customersPage, customersPageSize, loadAdmins, loadCustomers, loadPlatformSettings, loadProductServiceTypes, loadProductServices, loadUsers, productsTabId, usersPage, usersPageSize]);
 
   const goUsersPage = useCallback(async function (nextPage: number) {
     if (!admin) return;
@@ -310,6 +359,32 @@ function App() {
       setPanelBusy(false);
     }
   }, [admin, loadUsers]);
+
+  const goCustomersPage = useCallback(async function (nextPage: number) {
+    if (!admin) return;
+    setPanelBusy(true);
+    setError('');
+    try {
+      await loadCustomers(nextPage, customersPageSize);
+    } catch (e: any) {
+      setError(e?.message || '加载失败');
+    } finally {
+      setPanelBusy(false);
+    }
+  }, [admin, customersPageSize, loadCustomers]);
+
+  const changeCustomersPageSize = useCallback(async function (nextPageSize: number) {
+    if (!admin) return;
+    setPanelBusy(true);
+    setError('');
+    try {
+      await loadCustomers(1, nextPageSize);
+    } catch (e: any) {
+      setError(e?.message || '加载失败');
+    } finally {
+      setPanelBusy(false);
+    }
+  }, [admin, loadCustomers]);
 
   const toggleUserEnabled = useCallback(async function (target: UserRow) {
     setPanelBusy(true);
@@ -655,11 +730,13 @@ function App() {
           <header className="fzs-main-topbar fzs-admin-topbar">
             <div className="fzs-main-title">
               <div className="fzs-main-title-text">{activeNav.label}</div>
-              <div className="fzs-main-title-sub">{admin.phone}{admin.isSuperadmin ? '（超管）' : ''}</div>
+              <div className="fzs-main-title-sub">{activeNav.desc}</div>
             </div>
             <div className="fzs-user-area">
-              <button className="fzs-admin-entry" type="button" onClick={backToUser}>返回用户登录</button>
-              <button className="fzs-primary-button dark" type="button" onClick={logout}>退出管理员</button>
+              <div className="fzs-user-chip dark">
+                <span className="fzs-user-phone">{admin.phone}{admin.isSuperadmin ? '（超管）' : ''}</span>
+              </div>
+              <button className="fzs-admin-entry" type="button" onClick={logout}>退出登录</button>
             </div>
           </header>
 
@@ -667,8 +744,6 @@ function App() {
             <div className="fzs-panel fzs-admin-panel">
               <div className="fzs-panel-head">
                 <div className="fzs-panel-head-left">
-                  <div className="fzs-panel-title">{activeNav.label}</div>
-                  <div className="fzs-panel-desc">{activeNav.desc}</div>
                   {navId === 'products' && (
                     <div className="fzs-admin-tabs" role="tablist" aria-label="产品和服务管理">
                       <button
@@ -718,9 +793,55 @@ function App() {
                 {error && <div className="fzs-error">{error}</div>}
 
                 {navId === 'customers' && (
-                  <div className="fzs-empty-block">
-                    <div className="fzs-empty-title">客户管理</div>
-                    <div className="fzs-empty-desc">内容区域待你定义接入。</div>
+                  <div className="fzs-admin-table customers">
+                    <div className="fzs-admin-pager">
+                      <div className="fzs-admin-pager-left">
+                        <span>共 {customersTotal} 条</span>
+                        <span>第 {customersPage}/{Math.max(1, Math.ceil(customersTotal / customersPageSize))} 页</span>
+                      </div>
+                      <div className="fzs-admin-actions">
+                        <select className="fzs-admin-select" value={customersPageSize} onChange={(e) => void changeCustomersPageSize(Number(e.target.value))} disabled={panelBusy}>
+                          <option value={10}>10/页</option>
+                          <option value={20}>20/页</option>
+                          <option value={50}>50/页</option>
+                        </select>
+                        <button className="fzs-admin-mini" type="button" onClick={() => void goCustomersPage(customersPage - 1)} disabled={panelBusy || customersPage <= 1}>
+                          上一页
+                        </button>
+                        <button className="fzs-admin-mini" type="button" onClick={() => void goCustomersPage(customersPage + 1)} disabled={panelBusy || customersPage >= Math.ceil(customersTotal / customersPageSize)}>
+                          下一页
+                        </button>
+                      </div>
+                    </div>
+                    <div className="fzs-admin-row header">
+                      <div>企业名称</div><div>状态</div><div>统一社会信用代码</div><div>法人</div><div>活跃进展信息</div><div>成立日期</div><div>地址</div><div>操作</div>
+                    </div>
+                    {customers.length === 0 ? (
+                      <div className="fzs-empty-block">
+                        <div className="fzs-empty-desc">暂无客户数据</div>
+                      </div>
+                    ) : (
+                      customers.map((c) => (
+                        <div key={c.customerId} className="fzs-admin-row" style={{ opacity: c.isDeleted ? 0.5 : 1 }}>
+                          <div>{c.company.name}</div>
+                          <div>{c.company.status || '-'}</div>
+                          <div>{c.company.creditCode || '-'}</div>
+                          <div>{c.company.operName || '-'}</div>
+                          <div className="fzs-customer-metrics">
+                            <span className={c.activeFollowupCount > 0 ? 'fzs-metric active' : 'fzs-metric'}>跟进 {c.activeFollowupCount}</span>
+                            <span className={c.signingProjectCount > 0 ? 'fzs-metric active' : 'fzs-metric'}>签约 {c.signingProjectCount}</span>
+                            <span className={c.activeProjectCount > 0 ? 'fzs-metric active' : 'fzs-metric'}>项目 {c.activeProjectCount}</span>
+                          </div>
+                          <div>{c.company.startDate || '-'}</div>
+                          <div className="addr">{c.company.address || '-'}</div>
+                          <div className="fzs-admin-actions">
+                            <button className="fzs-admin-mini" type="button" disabled={panelBusy || c.isDeleted} onClick={() => void softDeleteCustomer(c.customerId)}>
+                              {c.isDeleted ? '已删除' : '删除'}
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
                   </div>
                 )}
 

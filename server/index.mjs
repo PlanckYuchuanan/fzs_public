@@ -566,6 +566,7 @@ async function ensureDbReady() {
     await state.pool.query('CREATE INDEX idx_customers_company_key_no ON customers(company_key_no);').catch(() => {});
     await state.pool.query('ALTER TABLE customers DROP INDEX idx_customers_user_company;').catch(() => {});
     await state.pool.query('CREATE UNIQUE INDEX idx_customers_user_name ON customers(user_id, company_name);').catch(() => {});
+    await ensureColumn('customers', 'is_deleted', 'ALTER TABLE customers ADD COLUMN is_deleted TINYINT(1) NOT NULL DEFAULT 0').catch(() => {});
 
     await state.pool.query(`
       INSERT IGNORE INTO customers (
@@ -1064,6 +1065,61 @@ async function main() {
         if (!userId) return writeJson(req, res, 400, { success: false, code: 'USER_ID_REQUIRED', message: '缺少用户ID' });
 
         await state.pool.query('UPDATE users SET is_enabled = ? WHERE id = ?', [isEnabled ? 1 : 0, userId]);
+        return writeJson(req, res, 200, { success: true });
+      }
+
+      if (req.method === 'GET' && pathname === '/api/admin/customers') {
+        const auth = await resolveAdminFromRequest(req);
+        if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });
+
+        const pageRaw = url.searchParams.get('page') || '1';
+        const pageSizeRaw = url.searchParams.get('pageSize') || '20';
+        const page = Math.max(1, Number.parseInt(pageRaw, 10) || 1);
+        const pageSize = Math.min(100, Math.max(1, Number.parseInt(pageSizeRaw, 10) || 20));
+        const offset = (page - 1) * pageSize;
+
+        const [totalRows] = await state.pool.query('SELECT COUNT(*) AS total FROM customers WHERE is_deleted = 0');
+        const total = Array.isArray(totalRows) && totalRows.length ? Number(totalRows[0]?.total || 0) : 0;
+
+        const [rows] = await state.pool.query(
+          `SELECT id, user_id, company_key_no, company_name, company_status, credit_code, reg_no, oper_name, address, start_date,
+                  active_followup_count, active_project_count, signing_project_count, is_deleted, created_at
+           FROM customers ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+          [pageSize, offset],
+        );
+        const customers = Array.isArray(rows)
+          ? rows.map((r) => ({
+              customerId: r.id,
+              userId: r.user_id,
+              createdAt: r.created_at,
+              company: {
+                keyNo: r.company_key_no,
+                name: r.company_name,
+                status: r.company_status || '',
+                creditCode: r.credit_code || '',
+                regNo: r.reg_no || '',
+                operName: r.oper_name || '',
+                address: r.address || '',
+                startDate: r.start_date || '',
+              },
+              activeFollowupCount: Number(r.active_followup_count) || 0,
+              activeProjectCount: Number(r.active_project_count) || 0,
+              signingProjectCount: Number(r.signing_project_count) || 0,
+              isDeleted: r.is_deleted !== 0,
+            }))
+          : [];
+        return writeJson(req, res, 200, { success: true, customers, page, pageSize, total });
+      }
+
+      if (req.method === 'POST' && pathname === '/api/admin/customers/soft-delete') {
+        const auth = await resolveAdminFromRequest(req);
+        if (!auth.ok) return writeJson(req, res, auth.statusCode, { success: false, code: auth.code, message: auth.message });
+
+        const body = await readJson(req);
+        const customerId = typeof body?.customerId === 'string' ? body.customerId : '';
+        if (!customerId) return writeJson(req, res, 400, { success: false, code: 'CUSTOMER_ID_REQUIRED', message: '缺少客户ID' });
+
+        await state.pool.query('UPDATE customers SET is_deleted = 1 WHERE id = ?', [customerId]);
         return writeJson(req, res, 200, { success: true });
       }
 

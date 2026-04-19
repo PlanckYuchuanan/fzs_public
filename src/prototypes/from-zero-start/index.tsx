@@ -63,7 +63,7 @@ function App() {
   const [phone, setPhone] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [authError, setAuthError] = useState<string>('');
-  const [user, setUser] = useState<{ userId: string; phone: string; registeredAt: string } | null>(null);
+  const [user, setUser] = useState<{ userId: string; phone: string; avatar?: string; registeredAt: string } | null>(null);
   const [authBusy, setAuthBusy] = useState<boolean>(false);
   const [userRegistrationEnabled, setUserRegistrationEnabled] = useState<boolean>(true);
   const [toastMessage, setToastMessage] = useState<string>('');
@@ -298,7 +298,9 @@ function App() {
         }
         setUser(null);
       }
-    } catch {}
+    } catch {
+      // 网络错误时不清理用户状态，避免页面闪动
+    }
   }, [fetchJson]);
 
   const submitAuth = useCallback(async function () {
@@ -552,6 +554,14 @@ function App() {
           </div>
           <div className="fzs-user-area">
             <div className="fzs-user-chip dark">
+              {user.avatar ? (
+                <img className="fzs-user-avatar" src={user.avatar} alt="头像" />
+              ) : (
+                <svg className="fzs-user-avatar-default" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                  <circle cx="12" cy="7" r="4"/>
+                </svg>
+              )}
               <span className="fzs-user-phone">{user.phone}</span>
             </div>
             <button className="fzs-link dark" type="button" onClick={logout}>退出</button>
@@ -562,8 +572,6 @@ function App() {
           <div className="fzs-panel">
             <div className="fzs-panel-head">
               <div className="fzs-panel-head-left">
-                <div className="fzs-panel-title">{activeNav.label}</div>
-                <div className="fzs-panel-desc">{activeNav.desc}</div>
               </div>
               <div className="fzs-panel-head-right">
                 {activeNav.id === 'customers' && (
@@ -823,14 +831,12 @@ function App() {
               )}
               {activeNav.id === 'projects' && (
                 <div className="fzs-empty-block">
-                  <div className="fzs-empty-title">项目管理</div>
-                  <div className="fzs-empty-desc">后续会在这里扩展项目、成员、资源与里程碑。</div>
+                  <div className="fzs-empty-title">后续会在这里扩展项目、成员、资源与里程碑。</div>
                 </div>
               )}
               {activeNav.id === 'orders' && (
                 <div className="fzs-empty-block">
-                  <div className="fzs-empty-title">制单管理</div>
-                  <div className="fzs-empty-desc">功能与数据将由你这边定义并接入。</div>
+                  <div className="fzs-empty-title">功能与数据将由你这边定义并接入。</div>
                 </div>
               )}
               {activeNav.id === 'products' && (
@@ -888,14 +894,12 @@ function App() {
               )}
               {activeNav.id === 'analytics' && (
                 <div className="fzs-empty-block">
-                  <div className="fzs-empty-title">数据分析</div>
-                  <div className="fzs-empty-desc">后续会在这里扩展报表、趋势与洞察。</div>
+                  <div className="fzs-empty-title">后续会在这里扩展报表、趋势与洞察。</div>
                 </div>
               )}
               {activeNav.id === 'settings' && (
                 <div className="fzs-empty-block">
-                  <div className="fzs-empty-title">系统设置</div>
-                  <div className="fzs-empty-desc">后续会在这里扩展权限、配置与安全策略。</div>
+                  <div className="fzs-empty-title">后续会在这里扩展权限、配置与安全策略。</div>
                 </div>
               )}
             </div>
